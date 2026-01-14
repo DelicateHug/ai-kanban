@@ -1,0 +1,8 @@
+using 2 agents run hostname and ipconfig
+
+Please read the file "C:\Users\dylan\OneDrive - Personal\Desktop\mission.txt"
+
+Please read the file "C:\Users\dylan\OneDrive - Personal\Desktop\mission.txt" and add the line hello to it
+
+
+Please read the file "C:\Users\dylan\OneDrive - Personal\Desktop\mission.txt" and remove the hello from it

@@ -7,7 +7,7 @@ export interface AvailableFile {
 }
 
 interface FileSelectorProps {
-  type: 'planning' | 'review';
+  type: 'planning' | 'review' | 'other';
   selectedFiles: string[];
   onSelectionChange: (files: string[]) => void;
   showHeader?: boolean;
@@ -16,18 +16,28 @@ interface FileSelectorProps {
 
 // Known instruction file directories - will be discovered from filesystem
 export const KNOWN_DIRECTORIES = {
-  planning: ['plan', 'summarize', 'select', 'distribute', 'work', 'continue', 'backlog', 'approval'],
-  review: ['review']
+  planning: ['plan'],
+  review: ['review'],
+  other: ['summarize', 'select', 'distribute', 'work', 'continue', 'backlog', 'approval']
+};
+
+// Primary directories shown first, others go to "Other" category
+export const PRIMARY_DIRECTORIES = {
+  planning: ['plan'],
+  review: ['review'],
+  other: ['summarize', 'select', 'distribute', 'work', 'continue', 'backlog', 'approval']
 };
 
 // File cache to avoid repeated discovery
 const fileCache: {
   planning: AvailableFile[] | null;
   review: AvailableFile[] | null;
+  other: AvailableFile[] | null;
   lastUpdated: number | null;
 } = {
   planning: null,
   review: null,
+  other: null,
   lastUpdated: null
 };
 
@@ -47,39 +57,45 @@ function notifyCacheListeners(): void {
 export function invalidateFileCache(): void {
   fileCache.planning = null;
   fileCache.review = null;
+  fileCache.other = null;
   fileCache.lastUpdated = null;
   notifyCacheListeners();
 }
 
 // Get cached files if available
-export function getCachedFiles(type: 'planning' | 'review'): AvailableFile[] | null {
+export function getCachedFiles(type: 'planning' | 'review' | 'other'): AvailableFile[] | null {
   return fileCache[type];
 }
 
 // Check if cache is valid
 export function isCacheValid(): boolean {
-  return fileCache.planning !== null && fileCache.review !== null;
+  return fileCache.planning !== null && fileCache.review !== null && fileCache.other !== null;
 }
 
 // File discovery - fetches available .md files from the directories
-export async function discoverInstructionFiles(type: 'planning' | 'review', forceRefresh = false): Promise<AvailableFile[]> {
+export async function discoverInstructionFiles(type: 'planning' | 'review' | 'other', forceRefresh = false): Promise<AvailableFile[]> {
   // Return cached files if available and not forcing refresh
   if (!forceRefresh && fileCache[type]) {
     return fileCache[type]!;
   }
 
+  console.log(`[FileSelector] Discovering ${type} files (forceRefresh: ${forceRefresh})...`);
   const directories = KNOWN_DIRECTORIES[type];
   const files: AvailableFile[] = [];
+  let apiAvailable = false;
   
   for (const dir of directories) {
     try {
-      // Try to fetch the directory listing via the backend API
-      const response = await fetch(`http://localhost:3001/api/files/${dir}`);
+      // Try to fetch the directory listing via the backend API (uses Vite proxy)
+      const response = await fetch(`/api/files/${dir}`);
       if (response.ok) {
+        apiAvailable = true;
         const data = await response.json();
-        if (data.files) {
+        if (data.success && data.files) {
           for (const file of data.files) {
             if (file.endsWith('.md')) {
+              // For 'other' type, categorize by the actual directory name
+              // For 'planning' and 'review', use the directory name as category
               files.push({
                 path: `${dir}/${file}`,
                 name: file.replace('.md', '').replace(/-/g, ' '),
@@ -87,16 +103,20 @@ export async function discoverInstructionFiles(type: 'planning' | 'review', forc
               });
             }
           }
+          console.log(`[FileSelector] Found ${data.files.filter((f: string) => f.endsWith('.md')).length} .md files in ${dir}`);
         }
       }
-    } catch {
-      // Fallback to known files if API not available
-      console.log(`Could not fetch files from ${dir}, using fallback`);
+    } catch (err) {
+      // Log the error but continue trying other directories
+      console.warn(`[FileSelector] Could not fetch files from ${dir}:`, err);
     }
   }
   
-  // If no files discovered, use fallback known files
-  const result = files.length === 0 ? getFallbackFiles(type) : files;
+  // If no files discovered from API, use fallback known files
+  // But only if the API wasn't available at all
+  const result = (!apiAvailable || files.length === 0) ? getFallbackFiles(type) : files;
+  
+  console.log(`[FileSelector] Discovered ${result.length} ${type} files${!apiAvailable ? ' (using fallback)' : ''}`);
   
   // Cache the result
   fileCache[type] = result;
@@ -109,17 +129,29 @@ export async function discoverInstructionFiles(type: 'planning' | 'review', forc
 export async function preloadAllFiles(): Promise<void> {
   await Promise.all([
     discoverInstructionFiles('planning', true),
-    discoverInstructionFiles('review', true)
+    discoverInstructionFiles('review', true),
+    discoverInstructionFiles('other', true)
   ]);
   console.log('File discovery complete - files cached');
 }
 
 // Fallback files when API is not available
-export function getFallbackFiles(type: 'planning' | 'review'): AvailableFile[] {
+export function getFallbackFiles(type: 'planning' | 'review' | 'other'): AvailableFile[] {
   if (type === 'planning') {
     return [
+      // Primary planning files only
       { path: 'plan/requirements-analysis.md', name: 'Requirements Analysis', category: 'plan' },
       { path: 'plan/architecture-design.md', name: 'Architecture Design', category: 'plan' },
+    ];
+  } else if (type === 'review') {
+    return [
+      { path: 'review/code-review.md', name: 'Code Review', category: 'review' },
+      { path: 'review/architecture-review.md', name: 'Architecture Review', category: 'review' },
+      { path: 'review/security-review.md', name: 'Security Review', category: 'review' },
+    ];
+  } else {
+    // Other instruction files - categorized by folder
+    return [
       { path: 'summarize/instructions.md', name: 'Instructions', category: 'summarize' },
       { path: 'select/file-selection.md', name: 'File Selection', category: 'select' },
       { path: 'select/scope-validation.md', name: 'Scope Validation', category: 'select' },
@@ -129,12 +161,6 @@ export function getFallbackFiles(type: 'planning' | 'review'): AvailableFile[] {
       { path: 'work/quality-assurance.md', name: 'Quality Assurance', category: 'work' },
       { path: 'continue/README.md', name: 'Continue Instructions', category: 'continue' },
       { path: 'approval/final-approval.md', name: 'Final Approval', category: 'approval' },
-    ];
-  } else {
-    return [
-      { path: 'review/code-review.md', name: 'Code Review', category: 'review' },
-      { path: 'review/architecture-review.md', name: 'Architecture Review', category: 'review' },
-      { path: 'review/security-review.md', name: 'Security Review', category: 'review' },
     ];
   }
 }
@@ -149,12 +175,16 @@ export const FileSelector: React.FC<FileSelectorProps> = ({
   const [availableFiles, setAvailableFiles] = useState<AvailableFile[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
 
   const loadFiles = async (forceRefresh = false) => {
     setIsLoading(true);
     try {
       const files = await discoverInstructionFiles(type, forceRefresh);
       setAvailableFiles(files);
+      if (forceRefresh) {
+        setLastRefresh(new Date());
+      }
     } catch (error) {
       console.error('Error discovering files:', error);
       setAvailableFiles(getFallbackFiles(type));
@@ -209,7 +239,7 @@ export const FileSelector: React.FC<FileSelectorProps> = ({
     return acc;
   }, {} as Record<string, AvailableFile[]>);
 
-  const accentColor = type === 'planning' ? 'var(--purple)' : 'var(--accent-orange)';
+  const accentColor = type === 'planning' ? 'var(--purple)' : type === 'review' ? 'var(--accent-orange)' : 'var(--accent-primary)';
 
   if (isLoading) {
     return (
@@ -223,26 +253,34 @@ export const FileSelector: React.FC<FileSelectorProps> = ({
   return (
     <div className="space-y-4">
       {showHeader && (
-        <div className="flex items-center justify-between">
-          <span className="text-sm font-medium text-secondary">
-            {selectedFiles.length} of {availableFiles.length} files selected
-          </span>
+        <div className="flex items-center justify-between flex-wrap gap-2">
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-medium text-secondary">
+              {selectedFiles.length} of {availableFiles.length} files selected
+            </span>
+            {lastRefresh && (
+              <span className="text-xs text-muted">
+                (refreshed {lastRefresh.toLocaleTimeString()})
+              </span>
+            )}
+          </div>
           <div className="flex gap-2 items-center">
             <button
               onClick={handleRefresh}
-              className="p-1 hover:bg-[var(--bg-elevated)] rounded transition-colors"
-              title="Refresh file list"
+              className="flex items-center gap-1 px-2 py-1 text-xs rounded hover:bg-[var(--bg-elevated)] transition-colors"
+              title="Refresh file list from filesystem"
               disabled={isLoading}
+              style={{ color: accentColor }}
             >
               <svg 
                 className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} 
                 fill="none" 
                 stroke="currentColor" 
                 viewBox="0 0 24 24"
-                style={{ color: accentColor }}
               >
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
               </svg>
+              <span>Refresh</span>
             </button>
             <span className="text-muted">|</span>
             <button
@@ -300,11 +338,18 @@ export const FileSelector: React.FC<FileSelectorProps> = ({
             <p>No files found matching "{searchQuery}"</p>
           </div>
         ) : (
-          Object.entries(groupedFiles).map(([category, files]) => (
+          Object.entries(groupedFiles)
+            // Sort so primary categories come first, 'other' comes last
+            .sort(([a], [b]) => {
+              if (a === 'other') return 1;
+              if (b === 'other') return -1;
+              return a.localeCompare(b);
+            })
+            .map(([category, files]) => (
             <div key={category}>
               <h4 className="text-xs font-semibold text-muted uppercase tracking-wider mb-2 flex items-center gap-2">
                 <span className="w-4 h-px" style={{ background: accentColor }}></span>
-                {category}
+                {category === 'other' ? 'Other Instructions' : category}
                 <span className="text-xs font-normal">({files.length})</span>
               </h4>
               <div className="space-y-1">

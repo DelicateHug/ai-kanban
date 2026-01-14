@@ -217,6 +217,11 @@ export interface ReviewConfig {
   defaultReviewFiles: string[];
 }
 
+export interface OtherInstructionsConfig {
+  enabled: boolean;
+  defaultFiles: string[];
+}
+
 export interface McpConfig {
   defaultServers: string[];
   availableServers: string[];
@@ -245,6 +250,7 @@ export interface AppConfig {
   history: HistoryConfig;
   planning: PlanningConfig;
   review: ReviewConfig;
+  otherInstructions: OtherInstructionsConfig;
   mcp: McpConfig;
   stages: Record<string, StageConfig>;
 }

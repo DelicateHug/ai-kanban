@@ -31,6 +31,19 @@
       "review/security-review.md"
     ]
   },
+  "otherInstructions": {
+    "enabled": true,
+    "defaultFiles": [
+      "summarize/instructions.md",
+      "select/file-selection.md",
+      "select/scope-validation.md",
+      "distribute/resource-allocation.md",
+      "distribute/work-assignment.md",
+      "work/implementation.md",
+      "work/quality-assurance.md",
+      "approval/final-approval.md"
+    ]
+  },
   "mcp": {
     "defaultServers": [
       "filesystem",

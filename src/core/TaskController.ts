@@ -61,9 +61,36 @@ class TaskController {
 
   private async processLoop(): Promise<void> {
     while (this.isRunning) {
+      // Clean up any stuck tasks first
+      this.cleanupStuckTasks();
+      
       await this.processPendingTasks();
       // Wait a bit before checking again
       await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+  }
+
+  /**
+   * Clean up tasks that are stuck in 'processing' status but are not actually being processed.
+   * This can happen if a worker crashes or if there's a race condition.
+   */
+  private cleanupStuckTasks(): void {
+    const allTasks = useTaskStore.getState().tasks;
+    
+    for (const [taskId, task] of allTasks) {
+      // If task has 'processing' status but is not in our processingTasks set,
+      // it's stuck and needs to be reset to 'active'
+      if (task.status === 'processing' && !this.processingTasks.has(taskId)) {
+        console.warn(`[TaskController] Found stuck task ${taskId} in stage ${task.currentStage}, resetting to active`);
+        useTaskStore.getState().setTaskStatus(taskId, 'active');
+        
+        appendHistoryEntry(
+          taskId,
+          'action',
+          task.currentStage,
+          'Task was stuck in processing status, reset to active for retry'
+        );
+      }
     }
   }
 

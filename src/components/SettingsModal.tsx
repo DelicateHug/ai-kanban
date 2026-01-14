@@ -9,7 +9,7 @@ interface SettingsModalProps {
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({ onClose }) => {
   const [settings, setSettings] = useState<AppConfig | null>(null);
-  const [activeTab, setActiveTab] = useState<'workers' | 'autosave' | 'planning' | 'review' | 'stages'>('workers');
+  const [activeTab, setActiveTab] = useState<'workers' | 'autosave' | 'planning' | 'review' | 'other' | 'stages'>('workers');
   const [isSaving, setIsSaving] = useState(false);
 
   useEffect(() => {
@@ -23,6 +23,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ onClose }) => {
           'review/architecture-review.md',
           'review/security-review.md'
         ]
+      };
+    }
+    if (!clonedConfig.otherInstructions) {
+      clonedConfig.otherInstructions = {
+        enabled: true,
+        defaultFiles: []
       };
     }
     setSettings(clonedConfig);
@@ -62,6 +68,17 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ onClose }) => {
       review: {
         ...settings.review,
         defaultReviewFiles: files
+      }
+    });
+  };
+
+  const handleOtherInstructionsFilesChange = (files: string[]) => {
+    if (!settings) return;
+    setSettings({
+      ...settings,
+      otherInstructions: {
+        ...settings.otherInstructions,
+        defaultFiles: files
       }
     });
   };
@@ -123,6 +140,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ onClose }) => {
             className={`tab ${activeTab === 'review' ? 'tab-active' : ''}`}
           >
             Review
+          </button>
+          <button
+            onClick={() => setActiveTab('other')}
+            className={`tab ${activeTab === 'other' ? 'tab-active' : ''}`}
+          >
+            Other
           </button>
           <button
             onClick={() => setActiveTab('stages')}
@@ -333,6 +356,19 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ onClose }) => {
                   maxHeight="280px"
                 />
               </div>
+
+              <div 
+                className="p-4 rounded-lg"
+                style={{ background: 'rgba(139,92,246,0.1)', border: '1px solid var(--purple)' }}
+              >
+                <h4 className="text-sm font-medium mb-2" style={{ color: 'var(--purple)' }}>How Planning Works</h4>
+                <p className="text-xs text-secondary">
+                  All selected planning files are combined into a single prompt for one AI agent. 
+                  This creates a unified planning session that considers all instructions together. 
+                  Unlike review (which spawns separate agents per file), planning is a single-round process 
+                  where the AI analyzes everything at once to produce a cohesive plan.
+                </p>
+              </div>
             </div>
           )}
 
@@ -363,6 +399,62 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ onClose }) => {
                   Unlike planning (which combines all files into one prompt), each review file creates a separate AI reviewer. 
                   This allows specialized reviews for code quality, architecture, security, etc. All reviews run in parallel 
                   and their results are synthesized for the approval stage.
+                </p>
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'other' && (
+            <div className="space-y-6">
+              <div>
+                <label className="flex items-center gap-3 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={settings.otherInstructions?.enabled ?? true}
+                    onChange={(e) => setSettings({
+                      ...settings,
+                      otherInstructions: { 
+                        ...settings.otherInstructions, 
+                        enabled: e.target.checked,
+                        defaultFiles: settings.otherInstructions?.defaultFiles ?? []
+                      }
+                    })}
+                    className="w-4 h-4 rounded accent-[var(--accent-primary)]"
+                  />
+                  <span className="text-sm font-medium text-primary">Enable Other Instructions</span>
+                </label>
+                <p className="mt-1 ml-7 text-xs text-muted">
+                  Include these instruction files in task processing stages
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-secondary mb-2">
+                  Default Instruction Files
+                </label>
+                <p className="text-xs text-muted mb-3">
+                  Select the instruction files that will be used by default. These are organized by stage category 
+                  (summarize, select, distribute, work, continue, approval).
+                </p>
+                
+                <FileSelector
+                  type="other"
+                  selectedFiles={settings.otherInstructions?.defaultFiles || []}
+                  onSelectionChange={handleOtherInstructionsFilesChange}
+                  maxHeight="280px"
+                />
+              </div>
+
+              <div 
+                className="p-4 rounded-lg"
+                style={{ background: 'rgba(0,191,166,0.1)', border: '1px solid var(--accent-primary)' }}
+              >
+                <h4 className="text-sm font-medium mb-2" style={{ color: 'var(--accent-primary)' }}>How Other Instructions Work</h4>
+                <p className="text-xs text-secondary">
+                  These instruction files guide the AI during various processing stages like summarization, file selection, 
+                  work distribution, implementation, and final approval. Each category corresponds to a specific stage in 
+                  the task workflow. Unlike Planning and Review which can be adjusted per-task, these settings apply globally 
+                  to all tasks.
                 </p>
               </div>
             </div>

@@ -39,6 +39,12 @@ export const TaskCard: React.FC<TaskCardProps> = ({
   const pauseTask = useTaskStore((state) => state.pauseTask);
   const resumeTask = useTaskStore((state) => state.resumeTask);
   const deleteTask = useTaskStore((state) => state.deleteTask);
+  const toggleTaskRead = useTaskStore((state) => state.toggleTaskRead);
+
+  const handleToggleRead = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    toggleTaskRead(task.id);
+  };
 
   // Close menu when clicking outside
   useEffect(() => {
@@ -168,9 +174,23 @@ export const TaskCard: React.FC<TaskCardProps> = ({
     >
       {/* Header */}
       <div className="flex items-start justify-between gap-3 mb-3">
-        <h4 className="font-medium text-primary text-sm leading-tight line-clamp-2 flex-1">
-          {task.title}
-        </h4>
+        <div className="flex items-start gap-2 flex-1">
+          {/* Read/Unread indicator */}
+          <button
+            onClick={handleToggleRead}
+            className={`flex-shrink-0 mt-0.5 w-3 h-3 rounded-full transition-all duration-200 hover:scale-125 ${
+              task.isRead ? 'opacity-30' : 'animate-pulse'
+            }`}
+            style={{
+              background: task.isRead ? 'var(--text-muted)' : 'var(--accent-primary)',
+              border: task.isRead ? '1px solid var(--border-secondary)' : 'none'
+            }}
+            title={task.isRead ? 'Mark as unread' : 'Mark as read'}
+          />
+          <h4 className="font-medium text-primary text-sm leading-tight line-clamp-2 flex-1">
+            {task.title}
+          </h4>
+        </div>
         <span
           className={`status-dot flex-shrink-0 mt-1 ${getStatusDotClass(task.status)}`}
           title={task.status}
@@ -335,6 +355,15 @@ export const TaskCard: React.FC<TaskCardProps> = ({
             </div>
           )}
         </div>
+        
+        {/* Delete button */}
+        <button
+          onClick={handleDeleteTask}
+          className="btn btn-sm btn-danger"
+          title="Delete task"
+        >
+          🗑️
+        </button>
       </div>
 
       {/* Error message preview */}

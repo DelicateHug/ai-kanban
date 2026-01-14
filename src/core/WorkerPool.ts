@@ -1,6 +1,7 @@
 import type { WorkerMessage, Task, Stage, MCPToolDefinition, ToolResult } from './types';
 import { getOrCreateStageClient, buildMessages } from './AIClient';
 import { useTaskStore } from './TaskStore';
+import { useFileLockStore } from './FileLockManager';
 import { validatePathForTask } from './PathSandbox';
 import { useProjectStore } from './ProjectStore';
 
@@ -426,9 +427,24 @@ export class WorkerPool {
       console.error(`Worker ${name} error:`, e);
       const inst = this.workers.get(id);
       if (inst) {
+        const currentTaskId = inst.currentTaskId;
+        const currentStage = 'work'; // Default to work, we don't know the actual stage
+        
         inst.status = 'error';
+        inst.currentTaskId = null;
+        
         // Release any locks held by this worker
         this.callbacks.onLockRelease(id, '*'); // Special case to release all
+        
+        // Report task failure so it gets moved to stopped stage
+        if (currentTaskId) {
+          this.callbacks.onTaskFailed(
+            id,
+            currentTaskId,
+            currentStage,
+            `Worker crashed: ${e.message || 'Unknown error'}`
+          );
+        }
       }
     };
 
@@ -557,6 +573,10 @@ export class WorkerPool {
       
       // Create tool executor that calls the backend
       const toolExecutor = async (toolName: string, input: unknown): Promise<ToolResult> => {
+        // Variables for file lock management - declared at top level for catch block access
+        const inputObjForLock = input as { path?: string; content?: string };
+        let lockAcquired = false;
+        
         try {
           // List of tools that access the filesystem
           const pathBasedTools = [
@@ -617,10 +637,45 @@ export class WorkerPool {
           // For write operations, get the file snapshot BEFORE making changes
           const writeTools = ['write_file', 'append_file', 'replace_in_file', 'insert_at_line', 'delete_file'];
           let contentBefore: string | undefined;
-          const inputObj = input as { path?: string; content?: string };
           
-          if (writeTools.includes(toolName) && inputObj.path && instance.currentTaskId) {
-            contentBefore = await getFileSnapshot(inputObj.path);
+          if (writeTools.includes(toolName) && inputObjForLock.path && instance.currentTaskId) {
+            contentBefore = await getFileSnapshot(inputObjForLock.path);
+            
+            // Acquire file lock before write operations
+            try {
+              const lockStore = useFileLockStore.getState();
+              await lockStore.requestLock(
+                workerId,
+                instance.name,
+                instance.currentTaskId,
+                inputObjForLock.path
+              );
+              lockAcquired = true;
+              
+              // Log lock acquisition
+              this.callbacks.onLogEntry(
+                workerId,
+                instance.currentTaskId,
+                stage,
+                'lock_acquired',
+                `Lock acquired for ${inputObjForLock.path}`,
+                { lockEvent: 'acquired', filePath: inputObjForLock.path }
+              );
+            } catch (lockError) {
+              const lockErrorMsg = lockError instanceof Error ? lockError.message : 'Lock acquisition failed';
+              this.callbacks.onLogEntry(
+                workerId,
+                instance.currentTaskId,
+                stage,
+                'lock_denied',
+                `Lock denied for ${inputObjForLock.path}: ${lockErrorMsg}`,
+                { lockEvent: 'failed', filePath: inputObjForLock.path, error: lockErrorMsg }
+              );
+              return {
+                success: false,
+                error: `Failed to acquire file lock: ${lockErrorMsg}`
+              };
+            }
           }
           
           // Get task sandbox settings for backend validation
@@ -664,41 +719,67 @@ export class WorkerPool {
           
           // Track file changes for write/append operations with before/after snapshots
           if (result.success && instance.currentTaskId) {
-            if (toolName === 'write_file' && inputObj.path) {
+            if (toolName === 'write_file' && inputObjForLock.path) {
               const isNewFile = contentBefore === undefined;
               useTaskStore.getState().addFileChange(instance.currentTaskId, {
-                file: inputObj.path,
+                file: inputObjForLock.path,
                 action: isNewFile ? 'created' : 'modified',
                 description: `File ${isNewFile ? 'created' : 'written'} via write_file tool`,
                 contentBefore: contentBefore,
-                contentAfter: inputObj.content,
-                diff: generateUnifiedDiff(contentBefore, inputObj.content, inputObj.path)
+                contentAfter: inputObjForLock.content,
+                diff: generateUnifiedDiff(contentBefore, inputObjForLock.content, inputObjForLock.path)
               });
-            } else if (toolName === 'append_file' && inputObj.path) {
-              const contentAfter = (contentBefore || '') + (inputObj.content || '');
+            } else if (toolName === 'append_file' && inputObjForLock.path) {
+              const contentAfter = (contentBefore || '') + (inputObjForLock.content || '');
               useTaskStore.getState().addFileChange(instance.currentTaskId, {
-                file: inputObj.path,
+                file: inputObjForLock.path,
                 action: contentBefore === undefined ? 'created' : 'modified',
                 description: `Content appended via append_file tool`,
                 contentBefore: contentBefore,
                 contentAfter: contentAfter,
-                diff: generateUnifiedDiff(contentBefore, contentAfter, inputObj.path)
+                diff: generateUnifiedDiff(contentBefore, contentAfter, inputObjForLock.path)
               });
-            } else if (toolName === 'delete_file' && inputObj.path) {
+            } else if (toolName === 'delete_file' && inputObjForLock.path) {
               useTaskStore.getState().addFileChange(instance.currentTaskId, {
-                file: inputObj.path,
+                file: inputObjForLock.path,
                 action: 'deleted',
                 description: `File deleted via delete_file tool`,
                 contentBefore: contentBefore,
                 contentAfter: undefined,
-                diff: generateUnifiedDiff(contentBefore, undefined, inputObj.path)
+                diff: generateUnifiedDiff(contentBefore, undefined, inputObjForLock.path)
               });
             }
+          }
+          
+          // Release file lock after write operation
+          if (lockAcquired && inputObjForLock.path) {
+            useFileLockStore.getState().releaseLock(workerId, inputObjForLock.path);
+            this.callbacks.onLogEntry(
+              workerId,
+              instance.currentTaskId || '',
+              stage,
+              'lock_released',
+              `Lock released for ${inputObjForLock.path}`,
+              { lockEvent: 'released', filePath: inputObjForLock.path }
+            );
           }
           
           return result;
         } catch (error) {
           const errorMsg = error instanceof Error ? error.message : 'Tool execution failed';
+          
+          // Release file lock on error
+          if (lockAcquired && inputObjForLock.path) {
+            useFileLockStore.getState().releaseLock(workerId, inputObjForLock.path);
+            this.callbacks.onLogEntry(
+              workerId,
+              instance.currentTaskId || '',
+              stage,
+              'action',
+              `Lock released for ${inputObjForLock.path} (after error)`,
+              { lockEvent: 'released', filePath: inputObjForLock.path }
+            );
+          }
           
           // Log failed tool call
           this.callbacks.onLogEntry(

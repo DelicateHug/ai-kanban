@@ -30,7 +30,7 @@ export const AgentSelectionModal: React.FC<AgentSelectionModalProps> = ({
       try {
         // Try to fetch files from API
         const type = stage === 'plan' ? 'planning' : 'review';
-        const response = await fetch(`http://localhost:3001/api/instruction-files/${type}`);
+        const response = await fetch(`/api/instruction-files/${type}`);
         if (response.ok) {
           const data = await response.json();
           setAvailableFiles(data.files || []);

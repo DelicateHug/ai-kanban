@@ -86,7 +86,7 @@ export const KanbanColumn: React.FC<KanbanColumnProps> = ({
           border: '1px solid var(--border-secondary)',
           minWidth: '160px'
         }}
-        title={`${formatStageName(stage)} - ${tasks.length} task${tasks.length !== 1 ? 's' : ''} - Click to expand`}
+        title={`${formatStageName(stage)} - ${tasks.length} task${tasks.length !== 1 ? 's' : ''}${hasUnreadTasks ? ` (${unreadCount} unread)` : ''} - Click to expand`}
       >
         {/* Icon with stage color background */}
         <div 

@@ -521,6 +521,7 @@ export const useTaskStore = create<TaskStore>()(
         totalOutputTokens: 0,
         finalOutput: '',
         allowExternalAccess: parent.allowExternalAccess || false,
+        isRead: false,
         createdAt: now,
         updatedAt: now,
         // Child task specific fields
@@ -924,16 +925,36 @@ export function deserializeTaskState(json: string): boolean {
 
     // Reset any 'processing' tasks to 'active' so they can be resumed after refresh
     // This handles the case where the app was closed/refreshed while tasks were being processed
+    // Also migrate existing tasks to have isRead property (defaulting to true for existing tasks)
     let resetCount = 0;
+    let migratedCount = 0;
     tasks.forEach((task, id) => {
+      let needsUpdate = false;
+      let updatedTask = { ...task };
+      
       if (task.status === 'processing') {
-        tasks.set(id, { ...task, status: 'active' });
+        updatedTask.status = 'active';
         resetCount++;
+        needsUpdate = true;
+      }
+      
+      // Migrate tasks that don't have isRead property (default to true so existing tasks don't all blink)
+      if (typeof task.isRead !== 'boolean') {
+        updatedTask.isRead = true;
+        migratedCount++;
+        needsUpdate = true;
+      }
+      
+      if (needsUpdate) {
+        tasks.set(id, updatedTask);
       }
     });
     
     if (resetCount > 0) {
       console.log(`Reset ${resetCount} processing tasks to active for resumption`);
+    }
+    if (migratedCount > 0) {
+      console.log(`Migrated ${migratedCount} tasks to have isRead property`);
     }
 
     // Update store

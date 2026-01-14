@@ -477,6 +477,92 @@ class FileReadRequest(BaseModel):
     path: str
     encoding: str = "utf-8"
 
+# Directory Listing Endpoint - for discovering instruction files
+@app.get("/api/files/{directory:path}")
+async def list_directory_files(directory: str):
+    """
+    List files in a directory relative to the project root.
+    Used for discovering instruction files in plan/, review/, etc.
+    """
+    import os
+    
+    try:
+        # Get the project root (parent of backend folder)
+        project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        
+        # Build the full path
+        full_path = os.path.join(project_root, directory)
+        
+        # Security: ensure we're still within project root
+        abs_project = os.path.abspath(project_root)
+        abs_target = os.path.abspath(full_path)
+        
+        if not abs_target.startswith(abs_project):
+            return {"success": False, "error": "Access denied: path outside project", "files": []}
+        
+        if not os.path.exists(full_path):
+            return {"success": False, "error": f"Directory not found: {directory}", "files": []}
+        
+        if not os.path.isdir(full_path):
+            return {"success": False, "error": f"Not a directory: {directory}", "files": []}
+        
+        # List all files in the directory
+        files = []
+        for item in os.listdir(full_path):
+            item_path = os.path.join(full_path, item)
+            if os.path.isfile(item_path):
+                files.append(item)
+        
+        return {"success": True, "directory": directory, "files": files}
+    
+    except Exception as e:
+        return {"success": False, "error": str(e), "files": []}
+
+# Instruction Files Endpoint - aggregates files from multiple directories
+INSTRUCTION_DIRECTORIES = {
+    'planning': ['plan', 'summarize', 'select', 'distribute', 'work', 'continue', 'backlog', 'approval'],
+    'review': ['review']
+}
+
+@app.get("/api/instruction-files/{file_type}")
+async def list_instruction_files(file_type: str):
+    """
+    List all instruction files for a given type (planning or review).
+    Aggregates .md files from all relevant directories.
+    """
+    import os
+    
+    if file_type not in INSTRUCTION_DIRECTORIES:
+        return {"success": False, "error": f"Unknown file type: {file_type}. Use 'planning' or 'review'.", "files": []}
+    
+    try:
+        project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        directories = INSTRUCTION_DIRECTORIES[file_type]
+        files = []
+        
+        for dir_name in directories:
+            full_path = os.path.join(project_root, dir_name)
+            
+            if not os.path.exists(full_path) or not os.path.isdir(full_path):
+                continue
+            
+            for item in os.listdir(full_path):
+                if item.endswith('.md'):
+                    item_path = os.path.join(full_path, item)
+                    if os.path.isfile(item_path):
+                        # Format name: remove .md, replace dashes with spaces, title case
+                        name = item.replace('.md', '').replace('-', ' ').title()
+                        files.append({
+                            "path": f"{dir_name}/{item}",
+                            "name": name,
+                            "category": dir_name
+                        })
+        
+        return {"success": True, "type": file_type, "files": files}
+    
+    except Exception as e:
+        return {"success": False, "error": str(e), "files": []}
+
 # File Read Endpoint
 @app.post("/api/file/read")
 async def read_file_endpoint(request: FileReadRequest):

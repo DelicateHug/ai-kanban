@@ -71,7 +71,7 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({ onClose, defau
     const loadFiles = async () => {
       // Try to fetch from API first, fallback to known files
       try {
-        const planningResponse = await fetch('http://localhost:3001/api/instruction-files/planning');
+        const planningResponse = await fetch('/api/instruction-files/planning');
         if (planningResponse.ok) {
           const data = await planningResponse.json();
           setPlanningFiles(data.files || []);
@@ -83,7 +83,7 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({ onClose, defau
       }
 
       try {
-        const reviewResponse = await fetch('http://localhost:3001/api/instruction-files/review');
+        const reviewResponse = await fetch('/api/instruction-files/review');
         if (reviewResponse.ok) {
           const data = await reviewResponse.json();
           setReviewFiles(data.files || []);

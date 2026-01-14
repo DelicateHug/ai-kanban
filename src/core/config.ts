@@ -120,6 +120,14 @@ export function getDefaultMcpServers(): string[] {
   ];
 }
 
+export function getOtherInstructionsEnabled(): boolean {
+  return getConfig().otherInstructions?.enabled ?? true;
+}
+
+export function getDefaultOtherInstructionFiles(): string[] {
+  return getConfig().otherInstructions?.defaultFiles ?? [];
+}
+
 export function getAutoSaveEnabled(): boolean {
   return getConfig().autoSave?.enabled ?? true;
 }
