@@ -1,0 +1,18 @@
+{
+  "projects": [
+    {
+      "id": "38cd9f7b-6f77-431c-924d-3a594fba4e98",
+      "name": "test",
+      "description": "",
+      "path": "C:/Users/dylan/OneDrive - Personal/Desktop/Projects/Github2/ai-jira/src",
+      "color": "#4ade80",
+      "icon": "📁",
+      "createdAt": "2026-01-14T14:31:10.742Z",
+      "updatedAt": "2026-01-14T14:31:10.742Z",
+      "taskCount": 0,
+      "activeTaskCount": 0
+    }
+  ],
+  "activeProjectId": "38cd9f7b-6f77-431c-924d-3a594fba4e98",
+  "savedAt": "2026-01-14T15:01:53.104Z"
+}

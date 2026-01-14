@@ -1,0 +1,55 @@
+{
+  "tasks": [],
+  "tasksByStage": [
+    [
+      "stopped",
+      []
+    ],
+    [
+      "continue",
+      []
+    ],
+    [
+      "backlog",
+      []
+    ],
+    [
+      "summarize",
+      []
+    ],
+    [
+      "create",
+      []
+    ],
+    [
+      "plan",
+      []
+    ],
+    [
+      "select",
+      []
+    ],
+    [
+      "distribute",
+      []
+    ],
+    [
+      "work",
+      []
+    ],
+    [
+      "review",
+      []
+    ],
+    [
+      "approval",
+      []
+    ],
+    [
+      "complete",
+      []
+    ]
+  ],
+  "savedAt": "2026-01-14T15:01:53.071Z",
+  "version": "1.0"
+}

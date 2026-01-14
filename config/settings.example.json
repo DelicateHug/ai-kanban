@@ -1,0 +1,98 @@
+{
+  "autoSave": {
+    "enabled": true,
+    "intervalSeconds": 10,
+    "filePath": "data/tasks.json"
+  },
+  "workers": {
+    "count": 4,
+    "lockTimeoutSeconds": 120,
+    "maxTurnCount": 10
+  },
+  "context": {
+    "summarizeThresholdPercent": 80,
+    "trackUsage": true
+  },
+  "history": {
+    "maxFileSizeBytes": 10485760,
+    "entriesPerPage": 50
+  },
+  "planning": {
+    "autoApprove": false,
+    "defaultPlanningFiles": [
+      "plan/requirements-analysis.md",
+      "plan/architecture-design.md"
+    ]
+  },
+  "review": {
+    "defaultReviewFiles": [
+      "review/code-review.md",
+      "review/architecture-review.md",
+      "review/security-review.md"
+    ]
+  },
+  "mcp": {
+    "defaultServers": [
+      "filesystem",
+      "terminal"
+    ],
+    "availableServers": [
+      "filesystem",
+      "terminal",
+      "browser",
+      "database",
+      "git",
+      "docker"
+    ]
+  },
+  "stages": {
+    "create": {
+      "provider": "openai",
+      "model": "gpt-4o-mini",
+      "apiKey": "YOUR_OPENAI_API_KEY",
+      "maxContextTokens": 128000
+    },
+    "summarize": {
+      "provider": "openai",
+      "model": "gpt-4o-mini",
+      "apiKey": "YOUR_OPENAI_API_KEY",
+      "maxContextTokens": 128000
+    },
+    "plan": {
+      "provider": "openai",
+      "model": "gpt-4o-mini",
+      "apiKey": "YOUR_OPENAI_API_KEY",
+      "maxContextTokens": 128000
+    },
+    "distribute": {
+      "provider": "openai",
+      "model": "gpt-4o-mini",
+      "apiKey": "YOUR_OPENAI_API_KEY",
+      "maxContextTokens": 128000
+    },
+    "select": {
+      "provider": "openai",
+      "model": "gpt-4o-mini",
+      "apiKey": "YOUR_OPENAI_API_KEY",
+      "maxContextTokens": 128000
+    },
+    "work": {
+      "provider": "openai",
+      "model": "gpt-4o-mini",
+      "apiKey": "YOUR_OPENAI_API_KEY",
+      "maxContextTokens": 128000
+    },
+    "review": {
+      "provider": "openai",
+      "model": "gpt-4o-mini",
+      "apiKey": "YOUR_OPENAI_API_KEY",
+      "maxContextTokens": 128000
+    },
+    "approval": {
+      "provider": "openai",
+      "model": "gpt-4o-mini",
+      "apiKey": "YOUR_OPENAI_API_KEY",
+      "maxContextTokens": 128000
+    }
+  }
+}

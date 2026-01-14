@@ -1,0 +1,8 @@
+# Backlog
+
+This folder contains task persistence. Each task has its own subfolder with:
+- `task.json` - Current state, working context, metadata
+- `history-{n}.json` - Complete history entries (split at 10MB)
+- `history-index.json` - Metadata for pagination
+
+Tasks in backlog are not yet ready to be processed.
