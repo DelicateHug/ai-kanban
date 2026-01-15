@@ -7,9 +7,23 @@ Write-Host "   AI Kanban Board - Startup" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
 
+# Instructions for users
+Write-Host "This script will:"
+Write-Host "  - Install Python if not present"
+Write-Host "  - Install Node.js (for npm) if not present"
+Write-Host "  - Create a Python virtual environment if needed"
+Write-Host "  - Install all required packages"
+Write-Host "  - Start the backend and frontend servers"
+Write-Host ""
+Write-Host "If installations fail, you may need to install manually:"
+Write-Host "  - Python: Download from https://python.org or use winget install python.python"
+Write-Host "  - Node.js: Download from https://nodejs.org or use winget install OpenJS.NodeJS"
+Write-Host ""
+
 # Get the directory where this script is located (project root)
 $ProjectDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $BackendDir = Join-Path $ProjectDir "backend"
+$VenvDir = Join-Path $ProjectDir ".venv"
 
 # Function to check if command exists
 function Test-Command($command) {
@@ -21,39 +35,75 @@ function Test-Command($command) {
     }
 }
 
-# Check Python
+# Function to install via winget
+function Install-WithWinget($package, $name) {
+    if (Test-Command "winget") {
+        Write-Host "Installing $name via winget..." -ForegroundColor Yellow
+        try {
+            winget install $package --silent --accept-source-agreements --accept-package-agreements
+            return $true
+        } catch {
+            Write-Host "Failed to install $name via winget. Please install manually." -ForegroundColor Red
+            return $false
+        }
+    } else {
+        Write-Host "winget not available. Please install $name manually." -ForegroundColor Red
+        return $false
+    }
+}
+
+# Check and install Python
 if (-not (Test-Command "python")) {
     Write-Host "[ERROR] Python is not installed or not in PATH" -ForegroundColor Red
-    Read-Host "Press Enter to exit"
-    exit 1
+    if (Install-WithWinget "python.python" "Python") {
+        # Refresh PATH or restart might be needed, but try
+        Write-Host "Python installed. Please restart PowerShell and run this script again." -ForegroundColor Yellow
+        Read-Host "Press Enter to exit"
+        exit 1
+    } else {
+        Read-Host "Press Enter to exit"
+        exit 1
+    }
 }
 
-# Check npm
+# Check and install Node.js (for npm)
 if (-not (Test-Command "npm")) {
     Write-Host "[ERROR] npm is not installed or not in PATH" -ForegroundColor Red
-    Read-Host "Press Enter to exit"
-    exit 1
+    if (Install-WithWinget "OpenJS.NodeJS" "Node.js") {
+        Write-Host "Node.js installed. Please restart PowerShell and run this script again." -ForegroundColor Yellow
+        Read-Host "Press Enter to exit"
+        exit 1
+    } else {
+        Read-Host "Press Enter to exit"
+        exit 1
+    }
 }
 
+# Create virtual environment if it doesn't exist
+if (-not (Test-Path $VenvDir)) {
+    Write-Host "[1/5] Creating Python virtual environment..." -ForegroundColor Yellow
+    python -m venv $VenvDir
+}
+
+# Activate virtual environment
+Write-Host "[2/5] Activating virtual environment..." -ForegroundColor Yellow
+& "$VenvDir\Scripts\Activate.ps1"
+
 # Install Python dependencies
-Write-Host "[1/4] Installing Python dependencies..." -ForegroundColor Yellow
+Write-Host "[3/5] Installing Python dependencies..." -ForegroundColor Yellow
 Push-Location $BackendDir
 pip install -r requirements.txt --quiet
 Pop-Location
 
-# Install npm dependencies if needed
-if (-not (Test-Path "$ProjectDir\node_modules")) {
-    Write-Host "[2/4] Installing npm dependencies..." -ForegroundColor Yellow
-    Push-Location $ProjectDir
-    npm install
-    Pop-Location
-} else {
-    Write-Host "[2/4] npm dependencies already installed" -ForegroundColor Green
-}
+# Install npm dependencies
+Write-Host "[4/5] Installing npm dependencies..." -ForegroundColor Yellow
+Push-Location $ProjectDir
+npm install
+Pop-Location
 
 # Start backend server
-Write-Host "[3/4] Starting MCP Backend Server (port 8765)..." -ForegroundColor Yellow
-$backendJob = Start-Process -FilePath "python" -ArgumentList "$BackendDir\mcp_server.py" -WorkingDirectory $ProjectDir -PassThru -WindowStyle Normal
+Write-Host "[5/6] Starting MCP Backend Server (port 8765)..." -ForegroundColor Yellow
+$backendJob = Start-Process -FilePath "$VenvDir\Scripts\python.exe" -ArgumentList "$BackendDir\mcp_server.py" -WorkingDirectory $ProjectDir -PassThru -WindowStyle Normal
 
 # Wait for backend to start
 Start-Sleep -Seconds 2
@@ -66,7 +116,7 @@ if ($backendJob.HasExited) {
 }
 
 # Start frontend dev server
-Write-Host "[4/4] Starting React Frontend (port 5173)..." -ForegroundColor Yellow
+Write-Host "[6/6] Starting React Frontend (port 5173)..." -ForegroundColor Yellow
 $frontendJob = Start-Process -FilePath "cmd.exe" -ArgumentList "/c npm run dev" -WorkingDirectory $ProjectDir -PassThru -WindowStyle Normal
 
 # Check if frontend started
