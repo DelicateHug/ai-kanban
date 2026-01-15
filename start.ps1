@@ -15,7 +15,7 @@ Write-Host "  - Create a Python virtual environment if needed"
 Write-Host "  - Install all required packages"
 Write-Host "  - Start the backend and frontend servers"
 Write-Host ""
-Write-Host "If installations fail, you may need to install manually:"
+Write-Host "If installations fa il, you may need to install manually:"
 Write-Host "  - Python: Download from https://python.org or use winget install python.python"
 Write-Host "  - Node.js: Download from https://nodejs.org or use winget install OpenJS.NodeJS"
 Write-Host ""
@@ -103,16 +103,41 @@ Pop-Location
 
 # Start backend server
 Write-Host "[5/6] Starting MCP Backend Server (port 8765)..." -ForegroundColor Yellow
-$backendJob = Start-Process -FilePath "$VenvDir\Scripts\python.exe" -ArgumentList "$BackendDir\mcp_server.py" -WorkingDirectory $ProjectDir -PassThru -WindowStyle Normal
+
+# Check if port 8765 is already in use
+$portInUse = Get-NetTCPConnection -LocalPort 8765 -ErrorAction SilentlyContinue
+if ($portInUse) {
+    Write-Host "[WARNING] Port 8765 is already in use. Killing existing process..." -ForegroundColor Yellow
+    $existingPid = $portInUse.OwningProcess | Select-Object -First 1
+    Stop-Process -Id $existingPid -Force -ErrorAction SilentlyContinue
+    Start-Sleep -Seconds 1
+}
+
+# Start backend with output redirection to see errors
+$backendLogFile = Join-Path $ProjectDir "backend_log.txt"
+$backendScript = Join-Path $BackendDir "mcp_server.py"
+$backendJob = Start-Process -FilePath "$VenvDir\Scripts\python.exe" -ArgumentList "`"$backendScript`"" -WorkingDirectory $ProjectDir -PassThru -WindowStyle Normal -RedirectStandardError $backendLogFile
 
 # Wait for backend to start
-Start-Sleep -Seconds 2
+Start-Sleep -Seconds 3
 
 # Check if backend is running
 if ($backendJob.HasExited) {
     Write-Host "[ERROR] Backend failed to start!" -ForegroundColor Red
+    if (Test-Path $backendLogFile) {
+        Write-Host "Error log:" -ForegroundColor Red
+        Get-Content $backendLogFile | Write-Host -ForegroundColor Red
+    }
     Read-Host "Press Enter to exit"
     exit 1
+}
+
+# Verify backend is actually responding
+try {
+    $response = Invoke-WebRequest -Uri "http://localhost:8765/" -TimeoutSec 5 -UseBasicParsing -ErrorAction Stop
+    Write-Host "   Backend health check passed!" -ForegroundColor Green
+} catch {
+    Write-Host "[WARNING] Backend started but health check failed. Continuing anyway..." -ForegroundColor Yellow
 }
 
 # Start frontend dev server

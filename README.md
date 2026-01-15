@@ -1,73 +1,106 @@
-# React + TypeScript + Vite
+# AI Kanban Board
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+An AI-powered Kanban board that orchestrates multiple AI agents to autonomously work on tasks. Think of it as an AI project manager that can plan, distribute, execute, review, and approve work across parallel workers.
 
-Currently, two official plugins are available:
+## What This Project Does
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+This application provides a visual Kanban interface where you can:
 
-## React Compiler
+- **Create Projects & Tasks** - Define work items that AI agents will autonomously complete
+- **Multi-Stage AI Pipeline** - Tasks flow through distinct stages: Summarize → Plan → Distribute → Select → Work → Review → Approval
+- **Parallel AI Workers** - Multiple AI agents can work on different tasks simultaneously with file locking to prevent conflicts
+- **Human-in-the-Loop Gates** - Configure approval checkpoints where humans must approve before work continues
+- **Context Management** - Automatic context summarization to keep AI agents focused within token limits
+- **MCP Integration** - Model Context Protocol servers provide AI agents with filesystem, terminal, and other tool capabilities
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+## Getting Started
 
-## Expanding the ESLint configuration
+### Prerequisites
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+- **Python 3.10+** - Will be auto-installed via winget if missing
+- **Node.js 18+** - Will be auto-installed via winget if missing
+- **Windows** - Currently optimized for Windows with PowerShell
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
+### Quick Start
 
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
+1. Open PowerShell in the project directory
+2. Run the startup script:
 
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```powershell
+.\start.ps1
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+This script will automatically:
+- Create a Python virtual environment
+- Install all Python dependencies
+- Install all npm packages
+- Start the MCP backend server
+- Start the React frontend dev server
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+3. Open your browser to `http://localhost:5173`
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+## Settings (⚙️ Gear Icon)
+
+Click the settings gear icon in the top-right corner to configure the application. Settings are organized into tabs:
+
+### Workers Tab
+| Setting | Description |
+|---------|-------------|
+| **Worker Count** | Number of parallel AI workers (1-10). More workers = more tasks processed simultaneously |
+| **Lock Timeout** | How long (in seconds) a file lock can be held before timing out (30-600s) |
+| **Max Turn Count** | Maximum AI conversation turns before requiring human approval |
+| **Context Summarize Threshold** | When context usage hits this % (50-95%), the system summarizes to free up space |
+
+### Auto-Save Tab
+| Setting | Description |
+|---------|-------------|
+| **Enable Auto-Save** | Toggle automatic saving of tasks |
+| **Save Interval** | How often to auto-save tasks (5-300 seconds) |
+| **Save File Path** | Where task data is persisted |
+
+### Planning Tab
+| Setting | Description |
+|---------|-------------|
+| **Auto Approve** | Skip human approval gates for planning stage |
+| **Default Planning Files** | Markdown instruction files used during the planning phase |
+
+### Review Tab
+| Setting | Description |
+|---------|-------------|
+| **Default Review Files** | Markdown instruction files guiding code review, architecture review, and security review |
+
+### Other Tab
+| Setting | Description |
+|---------|-------------|
+| **Other Instructions** | Additional instruction files for stages like summarize, select, distribute, work, and approval |
+
+### Stage Models Tab
+Configure which AI provider and model to use for each pipeline stage:
+- **Provider**: `openai`, `anthropic`, or other supported providers
+- **Model**: The specific model (e.g., `gpt-4o-mini`, `claude-3-sonnet`)
+- **API Key**: Your API key for the provider
+- **Max Context Tokens**: Token limit for the model's context window
+
+Each stage (Create, Summarize, Plan, Distribute, Select, Work, Review, Approval) can use different models, allowing you to optimize cost vs. capability per stage.
+
+## Configuration File
+
+Advanced settings can be edited directly in `config/settings.json`. See `config/settings.example.json` for the full schema.
+
+## Project Structure
+
 ```
+├── backend/          # Python MCP server
+├── src/              # React frontend
+│   ├── components/   # UI components (Kanban, Modals, etc.)
+│   └── core/         # Business logic (TaskController, AIClient, etc.)
+├── config/           # Settings files
+├── plan/             # Planning stage instruction files
+├── review/           # Review stage instruction files
+├── work/             # Work stage instruction files
+└── approval/         # Approval stage instruction files
+```
+
+## License
+
+MIT
