@@ -149,6 +149,9 @@ class MCPManagerClass {
     // Register the built-in FileReader MCP server
     await this.startBuiltInServer();
     
+    // Register the URL Fetcher MCP server
+    await this.startURLFetcherServer();
+    
     this.initialized = true;
     console.log('[MCPManager] Initialized');
   }
@@ -179,6 +182,65 @@ class MCPManagerClass {
     }
   }
 
+  private async startURLFetcherServer(): Promise<void> {
+    // Register the URL Fetcher server
+    useMCPStore.getState().registerServer({
+      id: 'url-fetcher',
+      name: 'URL Fetcher'
+    });
+
+    try {
+      // Check if the URL Fetcher server is running
+      const response = await fetch('http://localhost:8766/');
+      if (!response.ok) {
+        throw new Error(`Server returned ${response.status}`);
+      }
+      
+      // Define the tools available on the URL Fetcher server
+      const tools: MCPTool[] = [
+        {
+          name: 'fetch_url',
+          description: 'Fetch content from a single URL. Extracts readable text by default.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              url: { type: 'string', description: 'The URL to fetch content from' },
+              extract_text: { type: 'boolean', description: 'If true, extract readable text; if false, return raw HTML', default: true },
+              timeout: { type: 'number', description: 'Request timeout in seconds', default: 30 },
+              headers: { type: 'object', description: 'Optional custom headers to send with the request' }
+            },
+            required: ['url']
+          }
+        },
+        {
+          name: 'fetch_multiple_urls',
+          description: 'Fetch content from multiple URLs concurrently.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              urls: { type: 'array', items: { type: 'string' }, description: 'Array of URLs to fetch' },
+              extract_text: { type: 'boolean', description: 'If true, extract readable text; if false, return raw HTML', default: true },
+              timeout: { type: 'number', description: 'Request timeout in seconds', default: 30 }
+            },
+            required: ['urls']
+          }
+        }
+      ];
+      
+      useMCPStore.getState().setServerTools('url-fetcher', tools);
+      useMCPStore.getState().updateServerStatus('url-fetcher', 'running');
+      
+      console.log(`[MCPManager] URL Fetcher server started with ${tools.length} tools`);
+    } catch (error) {
+      useMCPStore.getState().updateServerStatus(
+        'url-fetcher',
+        'error',
+        error instanceof Error ? error.message : 'Failed to connect to URL Fetcher server'
+      );
+      console.warn('[MCPManager] URL Fetcher server not available:', error);
+    }
+  }
+
   /**
    * Execute a tool on a specific server
    */
@@ -200,6 +262,29 @@ class MCPManagerClass {
       if (serverId === 'file-reader') {
         const { mcpClient } = await import('../../mcp');
         const toolResult = await mcpClient.executeTool(toolName, input);
+        
+        if (!toolResult.success) {
+          throw new Error(toolResult.error || 'Tool execution failed');
+        }
+        result = toolResult.data;
+      } else if (serverId === 'url-fetcher') {
+        // Call the URL Fetcher server
+        const response = await fetch('http://localhost:8766/tool', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            tool: toolName,
+            input: input
+          })
+        });
+        
+        if (!response.ok) {
+          throw new Error(`URL Fetcher server returned ${response.status}`);
+        }
+        
+        const toolResult = await response.json();
         
         if (!toolResult.success) {
           throw new Error(toolResult.error || 'Tool execution failed');

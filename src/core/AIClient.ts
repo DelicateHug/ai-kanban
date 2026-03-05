@@ -151,17 +151,65 @@ class OpenAIClient implements AIClient {
       content: m.content
     }));
 
+    // Helper to truncate large content
+    const truncateContent = (content: string, maxChars: number = 50000): string => {
+      if (content.length <= maxChars) return content;
+      return content.slice(0, maxChars) + `\n\n[TRUNCATED: Content was ${content.length} chars, showing first ${maxChars}]`;
+    };
+
     // Loop for tool use
     let maxIterations = 10;
     while (maxIterations > 0) {
       maxIterations--;
 
-      const response = await this.client.chat.completions.create({
+      // Debug logging - calculate actual request payload size
+      const requestPayload = {
         model: this.model,
         messages: currentMessages,
         max_tokens: 4096,
         ...(openaiTools && openaiTools.length > 0 ? { tools: openaiTools } : {})
-      });
+      };
+      const payloadJson = JSON.stringify(requestPayload);
+      const payloadSizeBytes = new TextEncoder().encode(payloadJson).length;
+      const estimatedTokens = Math.ceil(payloadSizeBytes / 4);
+      console.log(`[OpenAI Request] Payload size: ${payloadSizeBytes} bytes, est. ${estimatedTokens} tokens`);
+      console.log(`[OpenAI Request] Messages: ${currentMessages.length}, Tools: ${openaiTools?.length || 0}`);
+      if (payloadSizeBytes > 100000) {
+        console.warn(`[OpenAI Request] Large payload detected! First 1000 chars of messages:`, 
+          JSON.stringify(currentMessages).slice(0, 1000));
+      }
+
+      // Retry logic for rate limits
+      let retryCount = 0;
+      const maxRetries = 3;
+      let response;
+      
+      while (retryCount <= maxRetries) {
+        try {
+          response = await this.client.chat.completions.create(requestPayload);
+          break; // Success, exit retry loop
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          
+          // Check if it's a rate limit error
+          if (errorMessage.includes('429') || errorMessage.toLowerCase().includes('rate limit')) {
+            retryCount++;
+            if (retryCount <= maxRetries) {
+              const waitTime = Math.pow(2, retryCount) * 1000; // Exponential backoff: 2s, 4s, 8s
+              console.log(`[OpenAI] Rate limited, retrying in ${waitTime/1000}s (attempt ${retryCount}/${maxRetries})`);
+              await new Promise(resolve => setTimeout(resolve, waitTime));
+              continue;
+            }
+          }
+          
+          // For non-rate-limit errors or exhausted retries, throw with more context
+          throw new Error(`OpenAI API error: ${errorMessage}. Estimated tokens in request: ${estimatedTokens}`);
+        }
+      }
+      
+      if (!response) {
+        throw new Error('Failed to get response from OpenAI after retries');
+      }
 
       const usage = response.usage;
       totalPromptTokens += usage?.prompt_tokens || 0;
@@ -197,9 +245,13 @@ class OpenAIClient implements AIClient {
             result: toolResult
           });
 
+          // Truncate large tool results to prevent context explosion
+          const resultContent = JSON.stringify(toolResult.data || toolResult.error);
+          const truncatedResult = truncateContent(resultContent, 50000);
+          
           currentMessages.push({
             role: 'tool',
-            content: JSON.stringify(toolResult.data || toolResult.error),
+            content: truncatedResult,
             tool_call_id: toolCall.id
           });
         }

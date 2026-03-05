@@ -12,6 +12,17 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ onClose }) => {
   const [activeTab, setActiveTab] = useState<'workers' | 'autosave' | 'planning' | 'review' | 'other' | 'stages'>('workers');
   const [isSaving, setIsSaving] = useState(false);
 
+  // Handle Escape key to close modal
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [onClose]);
+
   useEffect(() => {
     const config = getFullConfig();
     // Deep clone and ensure review config exists

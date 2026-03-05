@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import type { Task } from '../core/types';
 import { approveHumanGate, rejectHumanGate } from '../core/TaskStore';
 import { getAllHistory } from '../core/HistoryManager';
@@ -12,7 +12,7 @@ interface HumanGateModalProps {
   onClose: () => void;
 }
 
-type Tab = 'overview' | 'agents' | 'reviews' | 'work' | 'files' | 'history';
+type Tab = 'overview' | 'agents' | 'reviews' | 'work' | 'files' | 'history' | 'request';
 type DiffViewMode = 'unified' | 'split' | 'before' | 'after';
 
 export const HumanGateModal: React.FC<HumanGateModalProps> = ({ task, onClose }) => {
@@ -22,6 +22,17 @@ export const HumanGateModal: React.FC<HumanGateModalProps> = ({ task, onClose })
   const [expandedReview, setExpandedReview] = useState<number | null>(null);
   const [selectedFileIndex, setSelectedFileIndex] = useState<number | null>(null);
   const [diffViewMode, setDiffViewMode] = useState<DiffViewMode>('unified');
+
+  // Handle Escape key to close modal
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [onClose]);
 
   const isContinueGate = task.currentStage === 'continue';
   const isApprovalGate = task.currentStage === 'approval';
@@ -103,6 +114,7 @@ export const HumanGateModal: React.FC<HumanGateModalProps> = ({ task, onClose })
   const tabs: { id: Tab; label: string; count?: number }[] = [
     { id: 'overview', label: 'Overview' },
     { id: 'agents', label: 'Agents' },
+    { id: 'request', label: 'AI Request' },
     { id: 'reviews', label: 'Reviews', count: task.reviews.length },
     { id: 'work', label: 'Work Output' },
     { id: 'files', label: 'Files', count: task.changedFiles.length },
@@ -313,6 +325,187 @@ export const HumanGateModal: React.FC<HumanGateModalProps> = ({ task, onClose })
           {activeTab === 'agents' && (
             <div className="animate-fade-in">
               <AgentActivityPanel task={task} />
+            </div>
+          )}
+
+          {/* AI Request Tab */}
+          {activeTab === 'request' && (
+            <div className="space-y-6 animate-fade-in">
+              {task.lastAIRequest ? (
+                <>
+                  {/* Request Header */}
+                  <div className={`p-4 rounded-lg border-l-4 ${task.lastAIRequest.error ? 'border-l-red-500' : 'border-l-blue-500'}`}
+                    style={{ 
+                      background: task.lastAIRequest.error ? 'rgba(239,71,67,0.1)' : 'var(--bg-card)',
+                      border: '1px solid var(--border-secondary)'
+                    }}
+                  >
+                    <div className="flex items-center justify-between mb-4">
+                      <div className="flex items-center gap-3">
+                        <span className="text-2xl">{task.lastAIRequest.error ? '❌' : '🤖'}</span>
+                        <div>
+                          <h3 className="font-semibold text-primary">Last AI Request</h3>
+                          <p className="text-sm text-secondary">
+                            {new Date(task.lastAIRequest.timestamp).toLocaleString()}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="badge badge-info">{task.lastAIRequest.stage}</span>
+                        <button
+                          onClick={() => {
+                            const debugInfo = JSON.stringify({
+                              timestamp: task.lastAIRequest?.timestamp,
+                              stage: task.lastAIRequest?.stage,
+                              systemPrompt: task.lastAIRequest?.systemPrompt,
+                              userPrompt: task.lastAIRequest?.userPrompt,
+                              tools: task.lastAIRequest?.tools,
+                              totalTokensEstimate: task.lastAIRequest?.totalTokensEstimate,
+                              error: task.lastAIRequest?.error
+                            }, null, 2);
+                            navigator.clipboard.writeText(debugInfo);
+                          }}
+                          className="btn btn-secondary text-sm"
+                        >
+                          📋 Copy Full Request
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Error Display */}
+                    {task.lastAIRequest.error && (
+                      <div className="p-3 rounded-lg mb-4" style={{ background: 'rgba(239,71,67,0.2)' }}>
+                        <div className="text-sm font-semibold text-danger mb-1">Error</div>
+                        <div className="text-sm text-danger font-mono break-all">
+                          {task.lastAIRequest.error}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Stats Grid */}
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                      <div className="stat-card">
+                        <div className="stat-value">~{task.lastAIRequest.totalTokensEstimate.toLocaleString()}</div>
+                        <div className="stat-label">Estimated Tokens</div>
+                      </div>
+                      <div className="stat-card">
+                        <div className="stat-value">
+                          {task.lastAIRequest.actualInputTokens !== undefined 
+                            ? task.lastAIRequest.actualInputTokens.toLocaleString() 
+                            : '—'}
+                        </div>
+                        <div className="stat-label">Actual Input</div>
+                      </div>
+                      <div className="stat-card">
+                        <div className="stat-value">
+                          {task.lastAIRequest.actualOutputTokens !== undefined 
+                            ? task.lastAIRequest.actualOutputTokens.toLocaleString() 
+                            : '—'}
+                        </div>
+                        <div className="stat-label">Actual Output</div>
+                      </div>
+                      <div className="stat-card">
+                        <div className="stat-value">{task.lastAIRequest.tools.length}</div>
+                        <div className="stat-label">Tools Available</div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Tools List */}
+                  <div className="p-4 rounded-lg" style={{ background: 'var(--bg-card)', border: '1px solid var(--border-secondary)' }}>
+                    <div className="flex items-center justify-between mb-3">
+                      <h4 className="font-semibold text-primary flex items-center gap-2">
+                        <span>🔧</span> Available Tools ({task.lastAIRequest.tools.length})
+                      </h4>
+                      <button
+                        onClick={() => navigator.clipboard.writeText(task.lastAIRequest?.tools.join('\n') || '')}
+                        className="text-xs text-accent hover:underline"
+                      >
+                        Copy List
+                      </button>
+                    </div>
+                    <div className="flex flex-wrap gap-2 max-h-32 overflow-y-auto">
+                      {task.lastAIRequest.tools.map((tool, index) => (
+                        <span
+                          key={index}
+                          className="px-2 py-1 rounded text-xs font-mono"
+                          style={{ background: 'var(--bg-tertiary)', color: 'var(--text-secondary)' }}
+                        >
+                          {tool}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* System Prompt */}
+                  <div className="rounded-lg overflow-hidden" style={{ background: 'var(--bg-card)', border: '1px solid var(--border-secondary)' }}>
+                    <div className="p-3 flex items-center justify-between" style={{ background: 'var(--bg-elevated)' }}>
+                      <h4 className="font-semibold text-primary flex items-center gap-2">
+                        <span>📜</span> System Prompt
+                      </h4>
+                      <button
+                        onClick={() => navigator.clipboard.writeText(task.lastAIRequest?.systemPrompt || '')}
+                        className="text-xs text-accent hover:underline"
+                      >
+                        Copy
+                      </button>
+                    </div>
+                    <div className="p-4 max-h-64 overflow-y-auto">
+                      <pre className="text-sm font-mono whitespace-pre-wrap text-secondary">
+                        {task.lastAIRequest.systemPrompt}
+                      </pre>
+                    </div>
+                  </div>
+
+                  {/* User Prompt */}
+                  <div className="rounded-lg overflow-hidden" style={{ background: 'var(--bg-card)', border: '1px solid var(--border-secondary)' }}>
+                    <div className="p-3 flex items-center justify-between" style={{ background: 'var(--bg-elevated)' }}>
+                      <h4 className="font-semibold text-primary flex items-center gap-2">
+                        <span>💬</span> User Prompt
+                      </h4>
+                      <button
+                        onClick={() => navigator.clipboard.writeText(task.lastAIRequest?.userPrompt || '')}
+                        className="text-xs text-accent hover:underline"
+                      >
+                        Copy
+                      </button>
+                    </div>
+                    <div className="p-4 max-h-64 overflow-y-auto">
+                      <pre className="text-sm font-mono whitespace-pre-wrap text-secondary">
+                        {task.lastAIRequest.userPrompt}
+                      </pre>
+                    </div>
+                  </div>
+
+                  {/* AI Response */}
+                  <div className="rounded-lg overflow-hidden" style={{ background: 'var(--bg-card)', border: '1px solid var(--border-secondary)' }}>
+                    <div className="p-3 flex items-center justify-between" style={{ background: 'var(--bg-elevated)' }}>
+                      <h4 className="font-semibold text-primary flex items-center gap-2">
+                        <span>🤖</span> AI Response
+                      </h4>
+                      <button
+                        onClick={() => navigator.clipboard.writeText(task.lastAIResponse || '')}
+                        className="text-xs text-accent hover:underline"
+                      >
+                        Copy
+                      </button>
+                    </div>
+                    <div className="p-4 max-h-80 overflow-y-auto">
+                      {task.lastAIResponse ? (
+                        <MarkdownRenderer content={task.lastAIResponse} className="text-sm" />
+                      ) : (
+                        <p className="text-sm text-muted italic">No response recorded yet</p>
+                      )}
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <div className="text-center py-12 text-muted">
+                  <div className="text-4xl mb-3">📭</div>
+                  <p>No AI request recorded yet</p>
+                  <p className="text-sm mt-2">AI request details will appear here after the agent makes a request</p>
+                </div>
+              )}
             </div>
           )}
 

@@ -14,6 +14,17 @@ export const PlanningChatModal: React.FC<PlanningChatModalProps> = ({ task, onCl
   const [rejectReason, setRejectReason] = useState('');
   const chatContainerRef = useRef<HTMLDivElement>(null);
 
+  // Handle Escape key to close modal
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [onClose]);
+
   // Scroll to bottom when chat updates
   useEffect(() => {
     if (chatContainerRef.current) {

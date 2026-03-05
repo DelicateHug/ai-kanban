@@ -101,8 +101,8 @@ Push-Location $ProjectDir
 npm install
 Pop-Location
 
-# Start backend server
-Write-Host "[5/6] Starting MCP Backend Server (port 8765)..." -ForegroundColor Yellow
+# Start MCP backend server
+Write-Host "[5/7] Starting MCP Backend Server (port 8765)..." -ForegroundColor Yellow
 
 # Check if port 8765 is already in use
 $portInUse = Get-NetTCPConnection -LocalPort 8765 -ErrorAction SilentlyContinue
@@ -140,8 +140,48 @@ try {
     Write-Host "[WARNING] Backend started but health check failed. Continuing anyway..." -ForegroundColor Yellow
 }
 
+# Start URL Fetcher MCP server
+Write-Host "[6/7] Starting URL Fetcher MCP Server (port 8766)..." -ForegroundColor Yellow
+
+# Check if port 8766 is already in use
+$portInUse2 = Get-NetTCPConnection -LocalPort 8766 -ErrorAction SilentlyContinue
+if ($portInUse2) {
+    Write-Host "[WARNING] Port 8766 is already in use. Killing existing process..." -ForegroundColor Yellow
+    $existingPid2 = $portInUse2.OwningProcess | Select-Object -First 1
+    Stop-Process -Id $existingPid2 -Force -ErrorAction SilentlyContinue
+    Start-Sleep -Seconds 1
+}
+
+# Start URL fetcher backend
+$urlFetcherLogFile = Join-Path $ProjectDir "url_fetcher_log.txt"
+$urlFetcherScript = Join-Path $BackendDir "url_fetcher_mcp.py"
+$urlFetcherJob = Start-Process -FilePath "$VenvDir\Scripts\python.exe" -ArgumentList "`"$urlFetcherScript`"" -WorkingDirectory $ProjectDir -PassThru -WindowStyle Normal -RedirectStandardError $urlFetcherLogFile
+
+# Wait for URL fetcher to start
+Start-Sleep -Seconds 2
+
+# Check if URL fetcher is running
+if ($urlFetcherJob.HasExited) {
+    Write-Host "[ERROR] URL Fetcher MCP failed to start!" -ForegroundColor Red
+    if (Test-Path $urlFetcherLogFile) {
+        Write-Host "Error log:" -ForegroundColor Red
+        Get-Content $urlFetcherLogFile | Write-Host -ForegroundColor Red
+    }
+    Stop-Process -Id $backendJob.Id -Force -ErrorAction SilentlyContinue
+    Read-Host "Press Enter to exit"
+    exit 1
+}
+
+# Verify URL fetcher is actually responding
+try {
+    $response2 = Invoke-WebRequest -Uri "http://localhost:8766/" -TimeoutSec 5 -UseBasicParsing -ErrorAction Stop
+    Write-Host "   URL Fetcher health check passed!" -ForegroundColor Green
+} catch {
+    Write-Host "[WARNING] URL Fetcher started but health check failed. Continuing anyway..." -ForegroundColor Yellow
+}
+
 # Start frontend dev server
-Write-Host "[6/6] Starting React Frontend (port 5173)..." -ForegroundColor Yellow
+Write-Host "[7/7] Starting React Frontend (port 5173)..." -ForegroundColor Yellow
 $frontendJob = Start-Process -FilePath "cmd.exe" -ArgumentList "/c npm run dev" -WorkingDirectory $ProjectDir -PassThru -WindowStyle Normal
 
 # Check if frontend started
@@ -149,19 +189,21 @@ Start-Sleep -Seconds 1
 if ($null -eq $frontendJob -or $frontendJob.HasExited) {
     Write-Host "[ERROR] Frontend failed to start!" -ForegroundColor Red
     Stop-Process -Id $backendJob.Id -Force -ErrorAction SilentlyContinue
+    Stop-Process -Id $urlFetcherJob.Id -Force -ErrorAction SilentlyContinue
     Read-Host "Press Enter to exit"
     exit 1
 }
 
 Write-Host ""
 Write-Host "========================================" -ForegroundColor Green
-Write-Host "   Both servers are running!" -ForegroundColor Green
+Write-Host "   All servers are running!" -ForegroundColor Green
 Write-Host "========================================" -ForegroundColor Green
 Write-Host ""
-Write-Host "   MCP Backend:    http://localhost:8765" -ForegroundColor Cyan
-Write-Host "   React Frontend: http://localhost:5173" -ForegroundColor Cyan
+Write-Host "   MCP Backend:       http://localhost:8765" -ForegroundColor Cyan
+Write-Host "   URL Fetcher MCP:   http://localhost:8766" -ForegroundColor Cyan
+Write-Host "   React Frontend:    http://localhost:5173" -ForegroundColor Cyan
 Write-Host ""
-Write-Host "   Press Ctrl+C or close this window to stop both servers." -ForegroundColor Yellow
+Write-Host "   Press Ctrl+C or close this window to stop all servers." -ForegroundColor Yellow
 Write-Host ""
 
 # Wait and monitor
@@ -169,6 +211,10 @@ try {
     while ($true) {
         if ($backendJob.HasExited) {
             Write-Host "[WARNING] Backend server exited" -ForegroundColor Red
+            break
+        }
+        if ($urlFetcherJob.HasExited) {
+            Write-Host "[WARNING] URL Fetcher server exited" -ForegroundColor Red
             break
         }
         if ($null -ne $frontendJob -and $frontendJob.HasExited) {
@@ -184,6 +230,9 @@ try {
     
     if (-not $backendJob.HasExited) {
         Stop-Process -Id $backendJob.Id -Force -ErrorAction SilentlyContinue
+    }
+    if (-not $urlFetcherJob.HasExited) {
+        Stop-Process -Id $urlFetcherJob.Id -Force -ErrorAction SilentlyContinue
     }
     if ($null -ne $frontendJob -and -not $frontendJob.HasExited) {
         Stop-Process -Id $frontendJob.Id -Force -ErrorAction SilentlyContinue

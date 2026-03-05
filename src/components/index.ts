@@ -18,3 +18,5 @@ export { FileSelector, invalidateFileCache, preloadAllFiles } from './FileSelect
 export { ProjectOverview } from './ProjectOverview';
 export { ProjectSelector } from './ProjectSelector';
 export { CreateProjectModal } from './CreateProjectModal';
+export { EditProjectModal } from './EditProjectModal';
+export { FolderBrowser } from './FolderBrowser';

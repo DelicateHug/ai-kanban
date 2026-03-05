@@ -47,8 +47,11 @@ function App() {
         await mcpManager.initialize();
         
         // Then initialize task controller
+        console.log('%c[App] About to initialize TaskController', 'color: red; font-weight: bold');
         await taskController.initialize();
+        console.log('%c[App] TaskController initialized, calling start()', 'color: red; font-weight: bold');
         taskController.start();
+        console.log('%c[App] TaskController started!', 'color: green; font-weight: bold');
         setIsInitialized(true);
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to initialize');

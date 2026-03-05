@@ -23,6 +23,17 @@ export const AgentSelectionModal: React.FC<AgentSelectionModalProps> = ({
   const [isLoading, setIsLoading] = useState(true);
   const updateTask = useTaskStore((state) => state.updateTask);
 
+  // Handle Escape key to close modal
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [onClose]);
+
   // Load available files based on stage
   useEffect(() => {
     async function loadFiles() {

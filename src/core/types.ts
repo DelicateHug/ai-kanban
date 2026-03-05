@@ -103,6 +103,19 @@ export interface FileChange {
   timestamp?: string;      // When the change was recorded
 }
 
+// Debug info for last AI request
+export interface LastAIRequest {
+  timestamp: string;
+  stage: Stage;
+  systemPrompt: string;
+  userPrompt: string;
+  tools: string[];       // Tool names available
+  totalTokensEstimate: number;
+  actualInputTokens?: number;   // Actual input tokens used (from API response)
+  actualOutputTokens?: number;  // Actual output tokens used (from API response)
+  error?: string;        // Error message if request failed
+}
+
 export interface Task {
   id: string;
   title: string;
@@ -127,10 +140,12 @@ export interface Task {
   
   // Project association and sandboxing
   projectId?: string;              // Associated project ID (null = global/no project)
+  projectPath?: string;            // Resolved project path (set at runtime for workers)
   allowExternalAccess: boolean;    // If true, MCP tools can access files outside project folder
   
   // Skip options for simple tasks
   skipPlanning: boolean;       // If true, skip directly to select stage
+  skipSelect: boolean;         // If true, skip file selection stage (go directly to work)
   skipDistribute: boolean;     // If true, skip distribute stage (no child tasks created)
   skipReview: boolean;         // If true, skip review stage (go directly to approval)
   
@@ -150,6 +165,10 @@ export interface Task {
   errorMessage?: string;       // Error message if task moved to stopped stage
   previousStatus?: TaskStatus; // Status before pausing (for resume)
   isRead: boolean;             // Whether the task has been read/viewed by user
+  
+  // Debug info
+  lastAIRequest?: LastAIRequest;  // Last AI request sent for debugging
+  lastAIResponse?: string;        // Last AI response received for debugging
 }
 
 export type HistoryEntryType = 

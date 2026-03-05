@@ -742,3 +742,39 @@ body {
   from { opacity: 0; transform: translateY(20px); }
   to { opacity: 1; transform: translateY(0); }
 }
+/* ==========================================
+   Task Card Enhanced Styles
+   ========================================== */
+
+.task-card {
+  position: relative;
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+
+.task-card::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background: linear-gradient(135deg, rgba(255,255,255,0.03) 0%, transparent 50%);
+}
+
+.task-card:hover {
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35), 0 2px 4px rgba(0, 0, 0, 0.2) !important;
+}
+
+/* Task card header separator */
+.task-card-header {
+  padding-bottom: 0.75rem;
+  margin-bottom: 0.75rem;
+  border-bottom: 1px solid var(--border-secondary);
+}
+
+/* Task card section dividers */
+.task-card-section {
+  padding-top: 0.5rem;
+  padding-bottom: 0.5rem;
+  border-top: 1px dashed var(--border-secondary);
+}

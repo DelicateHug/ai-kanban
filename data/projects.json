@@ -1,5 +1,18 @@
 {
-  "projects": [],
-  "activeProjectId": null,
-  "savedAt": "2026-01-15T02:04:28.782Z"
+  "projects": [
+    {
+      "id": "f0a0c700-5433-4f7f-9d26-e7c58dff3f02",
+      "name": "AI Kanban",
+      "description": "",
+      "path": "C:\\Users\\dylan\\OneDrive - Personal\\Desktop\\Projects\\Github2\\ai-jira",
+      "color": "#4ade80",
+      "icon": "📁",
+      "createdAt": "2026-01-15T04:00:21.438Z",
+      "updatedAt": "2026-01-15T04:25:42.375Z",
+      "taskCount": 0,
+      "activeTaskCount": 0
+    }
+  ],
+  "activeProjectId": "f0a0c700-5433-4f7f-9d26-e7c58dff3f02",
+  "savedAt": "2026-01-15T14:05:22.867Z"
 }

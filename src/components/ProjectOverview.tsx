@@ -7,6 +7,7 @@ import React, { useState, useMemo } from 'react';
 import { useProjectStore } from '../core/ProjectStore';
 import { useTaskStore } from '../core/TaskStore';
 import type { Project } from '../core/types';
+import { EditProjectModal } from './EditProjectModal';
 
 // Helper to compute task counts for a project
 function useProjectTaskCounts(projectId: string): { taskCount: number; activeTaskCount: number } {
@@ -46,6 +47,7 @@ export const ProjectOverview: React.FC<ProjectOverviewProps> = ({
     [projectsMap]
   );
   const [hoveredProject, setHoveredProject] = useState<string | null>(null);
+  const [editingProject, setEditingProject] = useState<Project | null>(null);
 
   return (
     <div 
@@ -158,12 +160,23 @@ export const ProjectOverview: React.FC<ProjectOverviewProps> = ({
                   onMouseEnter={() => setHoveredProject(project.id)}
                   onMouseLeave={() => setHoveredProject(null)}
                   onClick={() => onSelectProject(project.id)}
+                  onEdit={() => setEditingProject(project)}
                 />
               ))}
             </div>
           )}
         </div>
       </div>
+
+      {/* Edit Project Modal */}
+      {editingProject && (
+        <EditProjectModal
+          project={editingProject}
+          onClose={() => setEditingProject(null)}
+          onUpdated={() => setEditingProject(null)}
+          onDelete={() => setEditingProject(null)}
+        />
+      )}
     </div>
   );
 };
@@ -174,6 +187,7 @@ interface ProjectCardProps {
   onMouseEnter: () => void;
   onMouseLeave: () => void;
   onClick: () => void;
+  onEdit: () => void;
 }
 
 const ProjectCard: React.FC<ProjectCardProps> = ({
@@ -182,16 +196,21 @@ const ProjectCard: React.FC<ProjectCardProps> = ({
   onMouseEnter,
   onMouseLeave,
   onClick,
+  onEdit,
 }) => {
   // Compute task counts dynamically from the task store
   const { taskCount, activeTaskCount } = useProjectTaskCounts(project.id);
   
+  const handleEditClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    onEdit();
+  };
+  
   return (
-    <button
-      onClick={onClick}
+    <div
       onMouseEnter={onMouseEnter}
       onMouseLeave={onMouseLeave}
-      className="p-5 rounded-xl transition-all duration-200 text-left w-full"
+      className="p-5 rounded-xl transition-all duration-200 text-left w-full relative group"
       style={{ 
         background: 'var(--bg-card)', 
         border: `2px solid ${isHovered ? project.color : 'var(--border-secondary)'}`,
@@ -199,54 +218,83 @@ const ProjectCard: React.FC<ProjectCardProps> = ({
         boxShadow: isHovered ? `0 8px 25px ${project.color}25` : 'none'
       }}
     >
-      <div className="flex items-start gap-4">
-        <div 
-          className="w-12 h-12 rounded-xl flex items-center justify-center text-2xl shrink-0"
-          style={{ background: `${project.color}20` }}
-        >
-          {project.icon}
-        </div>
-        <div className="flex-1 min-w-0">
-          <h3 className="font-semibold text-primary truncate">{project.name}</h3>
-          {project.description && (
-            <p className="text-sm text-muted mt-1 line-clamp-2">{project.description}</p>
-          )}
-          <div className="flex items-center gap-3 mt-3 text-xs text-muted">
-            <span className="flex items-center gap-1">
-              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
-              </svg>
-              {taskCount} tasks
-            </span>
-            {activeTaskCount > 0 && (
-              <span 
-                className="px-2 py-0.5 rounded-full text-xs font-medium"
-                style={{ background: `${project.color}30`, color: project.color }}
-              >
-                {activeTaskCount} active
-              </span>
-            )}
-          </div>
-        </div>
+      {/* Edit Button - always visible */}
+      <button
+        onClick={handleEditClick}
+        className="absolute top-3 right-3 p-2 rounded-lg transition-all hover:scale-110"
+        style={{ 
+          background: 'var(--bg-elevated)', 
+          border: '1px solid var(--border-secondary)',
+        }}
+        title="Edit project"
+      >
         <svg 
-          className="w-5 h-5 text-muted shrink-0 transition-transform"
-          style={{ transform: isHovered ? 'translateX(2px)' : 'none' }}
+          className="w-4 h-4 transition-colors" 
+          style={{ color: 'var(--text-muted)' }}
           fill="none" 
           stroke="currentColor" 
           viewBox="0 0 24 24"
+          onMouseEnter={(e) => e.currentTarget.style.color = project.color}
+          onMouseLeave={(e) => e.currentTarget.style.color = 'var(--text-muted)'}
         >
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
         </svg>
-      </div>
-      
-      {/* Project path */}
-      <div 
-        className="mt-3 pt-3 text-xs text-muted truncate"
-        style={{ borderTop: '1px solid var(--border-secondary)' }}
+      </button>
+
+      {/* Clickable area for opening project */}
+      <button
+        onClick={onClick}
+        className="w-full text-left"
       >
-        <span className="opacity-60">📂</span> {project.path}
-      </div>
-    </button>
+        <div className="flex items-start gap-4">
+          <div 
+            className="w-12 h-12 rounded-xl flex items-center justify-center text-2xl shrink-0"
+            style={{ background: `${project.color}20` }}
+          >
+            {project.icon}
+          </div>
+          <div className="flex-1 min-w-0 pr-8">
+            <h3 className="font-semibold text-primary truncate">{project.name}</h3>
+            {project.description && (
+              <p className="text-sm text-muted mt-1 line-clamp-2">{project.description}</p>
+            )}
+            <div className="flex items-center gap-3 mt-3 text-xs text-muted">
+              <span className="flex items-center gap-1">
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                </svg>
+                {taskCount} tasks
+              </span>
+              {activeTaskCount > 0 && (
+                <span 
+                  className="px-2 py-0.5 rounded-full text-xs font-medium"
+                  style={{ background: `${project.color}30`, color: project.color }}
+                >
+                  {activeTaskCount} active
+                </span>
+              )}
+            </div>
+          </div>
+          <svg 
+            className="w-5 h-5 text-muted shrink-0 transition-transform"
+            style={{ transform: isHovered ? 'translateX(2px)' : 'none' }}
+            fill="none" 
+            stroke="currentColor" 
+            viewBox="0 0 24 24"
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+          </svg>
+        </div>
+        
+        {/* Project path */}
+        <div 
+          className="mt-3 pt-3 text-xs text-muted truncate"
+          style={{ borderTop: '1px solid var(--border-secondary)' }}
+        >
+          <span className="opacity-60">📂</span> {project.path}
+        </div>
+      </button>
+    </div>
   );
 };
 

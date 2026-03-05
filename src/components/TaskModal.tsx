@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import type { Task, Stage } from '../core/types';
 import { STAGES } from '../core/types';
 import { HistoryViewer } from './HistoryViewer';
@@ -15,7 +15,7 @@ interface TaskModalProps {
   onSelectTask?: (task: Task) => void;  // For drilling into child tasks
 }
 
-type Tab = 'overview' | 'agents' | 'history' | 'reviews' | 'files' | 'subtasks' | 'output';
+type Tab = 'overview' | 'agents' | 'history' | 'reviews' | 'files' | 'subtasks' | 'output' | 'debug' | 'lastturn';
 
 export const TaskModal: React.FC<TaskModalProps> = ({ task, onClose, onSelectTask }) => {
   const [activeTab, setActiveTab] = useState<Tab>('overview');
@@ -32,6 +32,17 @@ export const TaskModal: React.FC<TaskModalProps> = ({ task, onClose, onSelectTas
   const parentTask = getParentTask(task.id);
   const hasChildren = childTasks.length > 0;
   const taskProject = task.projectId ? getProject(task.projectId) : null;
+
+  // Handle Escape key to close modal
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [onClose]);
 
   const getStageIcon = (stage: Stage): string => {
     const icons: Record<Stage, string> = {
@@ -94,14 +105,18 @@ export const TaskModal: React.FC<TaskModalProps> = ({ task, onClose, onSelectTas
     }
   };
 
+  const [lastTurnView, setLastTurnView] = useState<'request' | 'response'>('request');
+
   const tabs: { id: Tab; label: string; count?: number }[] = [
     { id: 'overview', label: 'Overview' },
     { id: 'agents', label: 'Agents', count: childTasks.length + 1 },
     { id: 'subtasks', label: 'Subtasks', count: childTasks.length },
     { id: 'history', label: 'History' },
+    { id: 'lastturn', label: 'AI Turn' },
     { id: 'reviews', label: 'Reviews', count: task.reviews.length },
     { id: 'files', label: 'Files', count: task.changedFiles.length },
-    { id: 'output', label: 'Output' }
+    { id: 'output', label: 'Output' },
+    { id: 'debug', label: 'Debug' }
   ];
 
   return (
@@ -159,14 +174,27 @@ export const TaskModal: React.FC<TaskModalProps> = ({ task, onClose, onSelectTas
               </p>
             )}
           </div>
-          <button
-            onClick={onClose}
-            className="p-2 hover:bg-[var(--bg-elevated)] rounded-lg transition-colors text-muted hover:text-primary"
-          >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
+          <div className="flex items-center gap-2">
+            {/* Delete button */}
+            <button
+              onClick={handleDeleteTask}
+              className="p-2 hover:bg-[rgba(239,71,67,0.15)] rounded-lg transition-colors text-muted hover:text-danger"
+              title="Delete task"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+              </svg>
+            </button>
+            {/* Close button */}
+            <button
+              onClick={onClose}
+              className="p-2 hover:bg-[var(--bg-elevated)] rounded-lg transition-colors text-muted hover:text-primary"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
         </div>
 
         {/* Tabs */}
@@ -641,6 +669,457 @@ export const TaskModal: React.FC<TaskModalProps> = ({ task, onClose, onSelectTas
                   <div className="stat-card">
                     <div className="stat-value">{task.finalOutput.split('\n').length.toLocaleString()}</div>
                     <div className="stat-label">Lines</div>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {activeTab === 'lastturn' && (
+            <div className="space-y-4">
+              {/* Header with stats */}
+              {task.lastAIRequest && (
+                <div 
+                  className="p-4 rounded-lg"
+                  style={{ 
+                    background: 'linear-gradient(135deg, rgba(42,196,140,0.08) 0%, rgba(96,165,250,0.08) 100%)',
+                    border: '1px solid var(--border-secondary)'
+                  }}
+                >
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center gap-3">
+                      <div 
+                        className="w-10 h-10 rounded-lg flex items-center justify-center text-xl"
+                        style={{ background: 'var(--bg-elevated)' }}
+                      >
+                        🤖
+                      </div>
+                      <div>
+                        <h3 className="font-semibold text-primary">Last AI Request</h3>
+                        <div className="text-xs text-muted">
+                          {new Date(task.lastAIRequest.timestamp).toLocaleString()}
+                        </div>
+                      </div>
+                    </div>
+                    <span 
+                      className="px-3 py-1 rounded-full text-xs font-medium"
+                      style={{ 
+                        background: 'rgba(96,165,250,0.2)',
+                        color: 'var(--info)'
+                      }}
+                    >
+                      {task.lastAIRequest.stage}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-4 gap-4">
+                    <div className="text-center">
+                      <div className="text-lg font-bold text-accent">~{task.lastAIRequest.totalTokensEstimate.toLocaleString()}</div>
+                      <div className="text-xs text-muted">tokens</div>
+                    </div>
+                    <div className="text-center">
+                      <div className="text-lg font-bold text-info">{task.lastAIRequest.tools.length}</div>
+                      <div className="text-xs text-muted">tools</div>
+                    </div>
+                    <div className="text-center">
+                      <div className="text-lg font-bold text-purple">{task.lastAIRequest.systemPrompt.length.toLocaleString()}</div>
+                      <div className="text-xs text-muted">sys chars</div>
+                    </div>
+                    <div className="text-center">
+                      <div className="text-lg font-bold text-success">{task.lastAIRequest.userPrompt.length.toLocaleString()}</div>
+                      <div className="text-xs text-muted">user chars</div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Toggle between Request and Response */}
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-1 p-1.5 rounded-xl" style={{ background: 'var(--bg-elevated)' }}>
+                  <button
+                    onClick={() => setLastTurnView('request')}
+                    className={`px-5 py-2.5 text-sm rounded-lg transition-all flex items-center gap-2 ${
+                      lastTurnView === 'request' 
+                        ? 'bg-gradient-to-r from-[var(--accent-primary)] to-[var(--accent-secondary)] text-black font-semibold shadow-lg' 
+                        : 'text-secondary hover:text-primary hover:bg-[var(--bg-tertiary)]'
+                    }`}
+                  >
+                    <span>📤</span> Request
+                  </button>
+                  <button
+                    onClick={() => setLastTurnView('response')}
+                    className={`px-5 py-2.5 text-sm rounded-lg transition-all flex items-center gap-2 ${
+                      lastTurnView === 'response' 
+                        ? 'bg-gradient-to-r from-[var(--accent-primary)] to-[var(--accent-secondary)] text-black font-semibold shadow-lg' 
+                        : 'text-secondary hover:text-primary hover:bg-[var(--bg-tertiary)]'
+                    }`}
+                  >
+                    <span>📥</span> Response
+                  </button>
+                </div>
+                <button
+                  onClick={() => {
+                    if (lastTurnView === 'request' && task.lastAIRequest) {
+                      navigator.clipboard.writeText(
+                        `System Prompt:\n${task.lastAIRequest.systemPrompt}\n\nUser Prompt:\n${task.lastAIRequest.userPrompt}`
+                      );
+                    } else if (lastTurnView === 'response' && task.lastAIResponse) {
+                      navigator.clipboard.writeText(task.lastAIResponse);
+                    }
+                  }}
+                  className="px-3 py-1.5 text-xs rounded-lg transition-all flex items-center gap-1.5 hover:bg-[var(--bg-elevated)]"
+                  style={{ color: 'var(--accent-primary)' }}
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" />
+                  </svg>
+                  Copy Full {lastTurnView === 'request' ? 'Request' : 'Response'}
+                </button>
+              </div>
+
+              {lastTurnView === 'request' ? (
+                /* Request View */
+                !task.lastAIRequest ? (
+                  <div className="text-center py-16" style={{ background: 'var(--bg-elevated)', borderRadius: '12px' }}>
+                    <div className="text-5xl mb-4 opacity-50">📤</div>
+                    <p className="text-muted text-lg font-medium">No AI request recorded yet</p>
+                    <p className="text-sm text-muted mt-2 max-w-sm mx-auto">
+                      The last AI request will appear here once the task starts processing
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {/* Error if any */}
+                    {task.lastAIRequest.error && (
+                      <div 
+                        className="p-4 rounded-xl border-l-4"
+                        style={{ 
+                          background: 'rgba(239,71,67,0.1)',
+                          borderLeftColor: 'var(--danger)'
+                        }}
+                      >
+                        <div className="flex items-center gap-2 text-danger font-semibold mb-2">
+                          <span>❌</span> Error Occurred
+                        </div>
+                        <pre className="text-sm text-danger font-mono break-all whitespace-pre-wrap">
+                          {task.lastAIRequest.error}
+                        </pre>
+                      </div>
+                    )}
+
+                    {/* System Prompt */}
+                    <div 
+                      className="rounded-xl overflow-hidden"
+                      style={{ border: '1px solid var(--border-secondary)', boxShadow: '0 2px 8px rgba(0,0,0,0.1)' }}
+                    >
+                      <div 
+                        className="px-4 py-3 flex items-center justify-between"
+                        style={{ background: 'linear-gradient(90deg, rgba(139,92,246,0.15) 0%, transparent 100%)' }}
+                      >
+                        <div className="flex items-center gap-2">
+                          <span className="text-lg">📋</span>
+                          <span className="text-sm font-semibold text-primary">System Prompt</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs px-2 py-1 rounded-full" style={{ background: 'var(--bg-elevated)', color: 'var(--text-muted)' }}>
+                            {task.lastAIRequest.systemPrompt.length.toLocaleString()} chars
+                          </span>
+                          <button
+                            onClick={() => navigator.clipboard.writeText(task.lastAIRequest!.systemPrompt)}
+                            className="text-xs text-muted hover:text-primary transition-colors"
+                            title="Copy system prompt"
+                          >
+                            📋
+                          </button>
+                        </div>
+                      </div>
+                      <div 
+                        className="p-4 max-h-[280px] overflow-y-auto"
+                        style={{ background: 'var(--bg-elevated)' }}
+                      >
+                        <pre className="whitespace-pre-wrap text-xs text-secondary font-mono leading-relaxed">
+                          {task.lastAIRequest.systemPrompt}
+                        </pre>
+                      </div>
+                    </div>
+
+                    {/* User Prompt */}
+                    <div 
+                      className="rounded-xl overflow-hidden"
+                      style={{ border: '1px solid var(--border-secondary)', boxShadow: '0 2px 8px rgba(0,0,0,0.1)' }}
+                    >
+                      <div 
+                        className="px-4 py-3 flex items-center justify-between"
+                        style={{ background: 'linear-gradient(90deg, rgba(42,196,140,0.15) 0%, transparent 100%)' }}
+                      >
+                        <div className="flex items-center gap-2">
+                          <span className="text-lg">💬</span>
+                          <span className="text-sm font-semibold text-primary">User Prompt</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs px-2 py-1 rounded-full" style={{ background: 'var(--bg-elevated)', color: 'var(--text-muted)' }}>
+                            {task.lastAIRequest.userPrompt.length.toLocaleString()} chars
+                          </span>
+                          <button
+                            onClick={() => navigator.clipboard.writeText(task.lastAIRequest!.userPrompt)}
+                            className="text-xs text-muted hover:text-primary transition-colors"
+                            title="Copy user prompt"
+                          >
+                            📋
+                          </button>
+                        </div>
+                      </div>
+                      <div 
+                        className="p-4 max-h-[350px] overflow-y-auto"
+                        style={{ background: 'var(--bg-elevated)' }}
+                      >
+                        <pre className="whitespace-pre-wrap text-xs text-secondary font-mono leading-relaxed">
+                          {task.lastAIRequest.userPrompt}
+                        </pre>
+                      </div>
+                    </div>
+
+                    {/* Tools Used */}
+                    {task.lastAIRequest.tools.length > 0 && (
+                      <div 
+                        className="rounded-xl overflow-hidden"
+                        style={{ border: '1px solid var(--border-secondary)' }}
+                      >
+                        <div 
+                          className="px-4 py-3 flex items-center justify-between"
+                          style={{ background: 'linear-gradient(90deg, rgba(96,165,250,0.15) 0%, transparent 100%)' }}
+                        >
+                          <div className="flex items-center gap-2">
+                            <span className="text-lg">🔧</span>
+                            <span className="text-sm font-semibold text-primary">Tools Available</span>
+                          </div>
+                          <span className="text-xs px-2 py-1 rounded-full" style={{ background: 'var(--bg-elevated)', color: 'var(--text-muted)' }}>
+                            {task.lastAIRequest.tools.length} tools
+                          </span>
+                        </div>
+                        <div 
+                          className="p-4 max-h-[150px] overflow-y-auto"
+                          style={{ background: 'var(--bg-elevated)' }}
+                        >
+                          <div className="flex flex-wrap gap-2">
+                            {task.lastAIRequest.tools.map((tool, i) => (
+                              <span 
+                                key={i}
+                                className="px-2 py-1 text-xs rounded-md font-mono"
+                                style={{ background: 'var(--bg-tertiary)', color: 'var(--info)' }}
+                              >
+                                {tool}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )
+              ) : (
+                /* Response View */
+                !task.lastAIResponse ? (
+                  <div className="text-center py-16" style={{ background: 'var(--bg-elevated)', borderRadius: '12px' }}>
+                    <div className="text-5xl mb-4 opacity-50">📥</div>
+                    <p className="text-muted text-lg font-medium">No AI response recorded yet</p>
+                    <p className="text-sm text-muted mt-2 max-w-sm mx-auto">
+                      The last AI response will appear here once the AI responds
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {/* Response Stats */}
+                    <div 
+                      className="flex items-center gap-6 px-4 py-3 rounded-xl"
+                      style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border-secondary)' }}
+                    >
+                      <div className="flex items-center gap-2">
+                        <span className="text-muted">📊</span>
+                        <span className="text-sm text-muted">{task.lastAIResponse.length.toLocaleString()} characters</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-muted">📝</span>
+                        <span className="text-sm text-muted">{task.lastAIResponse.split('\n').length} lines</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-muted">📖</span>
+                        <span className="text-sm text-muted">~{Math.round(task.lastAIResponse.length / 4).toLocaleString()} tokens</span>
+                      </div>
+                    </div>
+
+                    {/* Response Content */}
+                    <div 
+                      className="rounded-xl overflow-hidden"
+                      style={{ border: '1px solid var(--border-secondary)', boxShadow: '0 2px 8px rgba(0,0,0,0.1)' }}
+                    >
+                      <div 
+                        className="px-4 py-3 flex items-center justify-between"
+                        style={{ background: 'linear-gradient(90deg, rgba(42,196,140,0.2) 0%, rgba(96,165,250,0.1) 100%)' }}
+                      >
+                        <div className="flex items-center gap-2">
+                          <span className="text-lg">🤖</span>
+                          <span className="text-sm font-semibold text-primary">AI Response</span>
+                        </div>
+                        <button
+                          onClick={() => navigator.clipboard.writeText(task.lastAIResponse || '')}
+                          className="text-xs text-muted hover:text-primary transition-colors flex items-center gap-1"
+                          title="Copy response"
+                        >
+                          📋 Copy
+                        </button>
+                      </div>
+                      <div 
+                        className="p-4 max-h-[500px] overflow-y-auto"
+                        style={{ background: 'var(--bg-elevated)' }}
+                      >
+                        <pre className="whitespace-pre-wrap text-sm text-primary font-mono leading-relaxed">
+                          {task.lastAIResponse}
+                        </pre>
+                      </div>
+                    </div>
+                  </div>
+                )
+              )}
+            </div>
+          )}
+
+          {activeTab === 'debug' && (
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <h3 className="text-sm font-semibold text-secondary">Last AI Request</h3>
+                {task.lastAIRequest && (
+                  <button
+                    onClick={() => {
+                      const debugInfo = JSON.stringify({
+                        timestamp: task.lastAIRequest?.timestamp,
+                        stage: task.lastAIRequest?.stage,
+                        systemPrompt: task.lastAIRequest?.systemPrompt,
+                        userPrompt: task.lastAIRequest?.userPrompt,
+                        tools: task.lastAIRequest?.tools,
+                        totalTokensEstimate: task.lastAIRequest?.totalTokensEstimate,
+                        error: task.lastAIRequest?.error
+                      }, null, 2);
+                      navigator.clipboard.writeText(debugInfo);
+                    }}
+                    className="text-xs text-accent hover:underline flex items-center gap-1"
+                  >
+                    📋 Copy All
+                  </button>
+                )}
+              </div>
+
+              {!task.lastAIRequest ? (
+                <div className="text-center py-12">
+                  <div className="text-4xl mb-4">🔍</div>
+                  <p className="text-muted">No AI request recorded yet</p>
+                  <p className="text-sm text-muted mt-1">
+                    The last AI request will appear here once the task starts processing
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {/* Error Banner */}
+                  {task.lastAIRequest.error && (
+                    <div 
+                      className="p-4 rounded-lg border-l-4 border-l-red-500"
+                      style={{ background: 'rgba(239,71,67,0.1)', border: '1px solid rgba(239,71,67,0.3)' }}
+                    >
+                      <div className="flex items-center gap-2 mb-2">
+                        <span className="text-lg">❌</span>
+                        <span className="font-semibold text-danger">Request Failed</span>
+                      </div>
+                      <pre className="text-sm text-danger whitespace-pre-wrap font-mono overflow-x-auto">
+                        {task.lastAIRequest.error}
+                      </pre>
+                    </div>
+                  )}
+
+                  {/* Request Info */}
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    <div className="stat-card">
+                      <div className="stat-value text-xs">{new Date(task.lastAIRequest.timestamp).toLocaleTimeString()}</div>
+                      <div className="stat-label">Timestamp</div>
+                    </div>
+                    <div className="stat-card">
+                      <div className="stat-value text-sm">{task.lastAIRequest.stage}</div>
+                      <div className="stat-label">Stage</div>
+                    </div>
+                    <div className="stat-card">
+                      <div className="stat-value">{task.lastAIRequest.totalTokensEstimate.toLocaleString()}</div>
+                      <div className="stat-label">Est. Tokens</div>
+                    </div>
+                    <div className="stat-card">
+                      <div className="stat-value">{task.lastAIRequest.tools.length}</div>
+                      <div className="stat-label">Tools</div>
+                    </div>
+                  </div>
+
+                  {/* Tools List */}
+                  {task.lastAIRequest.tools.length > 0 && (
+                    <div>
+                      <div className="flex items-center justify-between mb-2">
+                        <h4 className="text-sm font-semibold text-secondary">Available Tools</h4>
+                      </div>
+                      <div className="flex flex-wrap gap-1">
+                        {task.lastAIRequest.tools.map((tool, index) => (
+                          <span 
+                            key={index}
+                            className="px-2 py-1 rounded text-xs font-mono"
+                            style={{ background: 'var(--bg-elevated)', color: 'var(--text-secondary)' }}
+                          >
+                            {tool}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* System Prompt */}
+                  <div>
+                    <div className="flex items-center justify-between mb-2">
+                      <h4 className="text-sm font-semibold text-secondary">System Prompt</h4>
+                      <button
+                        onClick={() => navigator.clipboard.writeText(task.lastAIRequest?.systemPrompt || '')}
+                        className="text-xs text-accent hover:underline"
+                      >
+                        📋 Copy
+                      </button>
+                    </div>
+                    <div 
+                      className="p-4 rounded-lg max-h-[300px] overflow-y-auto"
+                      style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border-secondary)' }}
+                    >
+                      <pre className="whitespace-pre-wrap text-xs text-secondary font-mono">
+                        {task.lastAIRequest.systemPrompt}
+                      </pre>
+                    </div>
+                    <div className="text-xs text-muted mt-1">
+                      {task.lastAIRequest.systemPrompt.length.toLocaleString()} characters
+                    </div>
+                  </div>
+
+                  {/* User Prompt */}
+                  <div>
+                    <div className="flex items-center justify-between mb-2">
+                      <h4 className="text-sm font-semibold text-secondary">User Prompt</h4>
+                      <button
+                        onClick={() => navigator.clipboard.writeText(task.lastAIRequest?.userPrompt || '')}
+                        className="text-xs text-accent hover:underline"
+                      >
+                        📋 Copy
+                      </button>
+                    </div>
+                    <div 
+                      className="p-4 rounded-lg max-h-[400px] overflow-y-auto"
+                      style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border-secondary)' }}
+                    >
+                      <pre className="whitespace-pre-wrap text-xs text-secondary font-mono">
+                        {task.lastAIRequest.userPrompt}
+                      </pre>
+                    </div>
+                    <div className="text-xs text-muted mt-1">
+                      {task.lastAIRequest.userPrompt.length.toLocaleString()} characters
+                    </div>
                   </div>
                 </div>
               )}

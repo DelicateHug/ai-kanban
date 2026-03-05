@@ -20,14 +20,22 @@ const INITIAL_STAGES: { value: Stage; label: string; icon: string }[] = [
   { value: 'create', label: 'Ready to Start', icon: '✨' },
   { value: 'backlog', label: 'Backlog', icon: '📋' },
   { value: 'plan', label: 'Planning', icon: '📐' },
+  { value: 'select', label: 'Select Files', icon: '📁' },
 ];
 
 interface CreateTaskModalProps {
   onClose: () => void;
   defaultProjectId?: string | null; // Pre-select a project
+  simpleMode?: boolean; // Simple mode from parent
+  autoStartTasks?: boolean; // Auto start from parent
 }
 
-export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({ onClose, defaultProjectId }) => {
+export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({ 
+  onClose, 
+  defaultProjectId,
+  simpleMode = false,
+  autoStartTasks = false 
+}) => {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -37,14 +45,17 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({ onClose, defau
   const [showPlanningFiles, setShowPlanningFiles] = useState(false);
   const [showReviewFiles, setShowReviewFiles] = useState(false);
   const [showMcpServers, setShowMcpServers] = useState(false);
-  const [skipPlanning, setSkipPlanning] = useState(false);
-  const [skipDistribute, setSkipDistribute] = useState(false);
-  const [skipReview, setSkipReview] = useState(false);
+  const [skipPlanning, setSkipPlanning] = useState(simpleMode);
+  // skipSelect is automatically set when simpleMode is true - no UI control needed
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const [skipSelect, _setSkipSelect] = useState(simpleMode);
+  const [skipDistribute, setSkipDistribute] = useState(simpleMode);
+  const [skipReview, setSkipReview] = useState(simpleMode);
   const [planningFiles, setPlanningFiles] = useState<AvailableFile[]>([]);
   const [reviewFiles, setReviewFiles] = useState<AvailableFile[]>([]);
   const [searchPlanningQuery, setSearchPlanningQuery] = useState('');
   const [searchReviewQuery, setSearchReviewQuery] = useState('');
-  const [initialStage, setInitialStage] = useState<Stage>('create');
+  const [initialStage, setInitialStage] = useState<Stage>(autoStartTasks ? (simpleMode ? 'select' : 'plan') : 'create');
   
   // Project and sandbox settings
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(defaultProjectId ?? null);
@@ -60,6 +71,34 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({ onClose, defau
   const selectedProject = useProjectStore((state) => 
     selectedProjectId ? state.getProject(selectedProjectId) : null
   );
+
+  // Handle Escape key to close modal
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [onClose]);
+
+  // Handle auto-start tasks - set initial stage based on skip options
+  useEffect(() => {
+    if (autoStartTasks) {
+      if (skipPlanning && skipSelect) {
+        // If skipping both planning and select, start at work stage
+        setInitialStage('work');
+      } else if (skipPlanning) {
+        setInitialStage('select');
+      } else {
+        setInitialStage('plan');
+      }
+    } else {
+      // When auto-start is disabled, reset to create stage
+      setInitialStage('create');
+    }
+  }, [autoStartTasks, skipPlanning, skipSelect]);
 
   // Initialize with default files from settings and load available files
   useEffect(() => {
@@ -134,7 +173,8 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({ onClose, defau
         selectedPlanningFiles, 
         selectedReviewFiles, 
         selectedMcpServers, 
-        skipPlanning, 
+        skipPlanning,
+        skipSelect,
         skipDistribute, 
         skipReview,
         selectedProjectId ?? undefined,
@@ -167,6 +207,27 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({ onClose, defau
 
         {/* Form */}
         <form onSubmit={handleSubmit} className="modal-body space-y-4">
+          {/* Mode indicator */}
+          {simpleMode && (
+            <div 
+              className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm"
+              style={{ background: 'rgba(42,196,140,0.1)', border: '1px solid var(--accent-primary)' }}
+            >
+              <span>🚀</span>
+              <span className="text-primary">Simple Mode - skipping planning, file selection, distribution, and review stages</span>
+            </div>
+          )}
+          
+          {autoStartTasks && (
+            <div 
+              className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm"
+              style={{ background: 'rgba(168,85,247,0.1)', border: '1px solid var(--purple)' }}
+            >
+              <span>⚡</span>
+              <span className="text-primary">Auto Start - task will begin in <strong>{skipPlanning && skipSelect ? 'Work' : skipPlanning ? 'Select' : 'Plan'}</strong> stage</span>
+            </div>
+          )}
+
           <div>
             <label htmlFor="title" className="block text-sm font-medium text-secondary mb-1">
               Title <span className="text-danger">*</span>
@@ -207,40 +268,52 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({ onClose, defau
           </div>
 
           {/* Initial Stage Selection */}
-          <div>
-            <label className="block text-sm font-medium text-secondary mb-2">
-              Initial Stage
-            </label>
-            <div className="flex gap-2">
-              {INITIAL_STAGES.map(({ value, label, icon }) => (
-                <button
-                  key={value}
-                  type="button"
-                  onClick={() => setInitialStage(value)}
-                  className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-all flex items-center justify-center gap-2 ${
-                    initialStage === value 
-                      ? 'ring-2 ring-[var(--accent-primary)]' 
-                      : 'hover:bg-[var(--bg-secondary)]'
-                  }`}
-                  style={{ 
-                    background: initialStage === value ? 'var(--accent-primary)' : 'var(--bg-elevated)',
-                    border: '1px solid var(--border-secondary)',
-                    color: initialStage === value ? '#000' : 'var(--text-primary)'
-                  }}
-                >
-                  <span>{icon}</span>
-                  <span>{label}</span>
-                </button>
-              ))}
+          {!autoStartTasks && (
+            <div>
+              <label className="block text-sm font-medium text-secondary mb-2">
+                Initial Stage
+              </label>
+              <div className="flex gap-2 flex-wrap">
+                {INITIAL_STAGES
+                  .filter(({ value }) => {
+                    // Hide select stage if not skipping planning
+                    if (value === 'select' && !skipPlanning) return false;
+                    // Hide plan stage if skipping planning
+                    if (value === 'plan' && skipPlanning) return false;
+                    return true;
+                  })
+                  .map(({ value, label, icon }) => (
+                  <button
+                    key={value}
+                    type="button"
+                    onClick={() => setInitialStage(value)}
+                    className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-all flex items-center justify-center gap-2 ${
+                      initialStage === value 
+                        ? 'ring-2 ring-[var(--accent-primary)]' 
+                        : 'hover:bg-[var(--bg-secondary)]'
+                    }`}
+                    style={{ 
+                      background: initialStage === value ? 'var(--accent-primary)' : 'var(--bg-elevated)',
+                      border: '1px solid var(--border-secondary)',
+                      color: initialStage === value ? '#000' : 'var(--text-primary)'
+                    }}
+                  >
+                    <span>{icon}</span>
+                    <span>{label}</span>
+                  </button>
+                ))}
+              </div>
+              <p className="text-xs text-muted mt-1">
+                {initialStage === 'backlog' 
+                  ? 'Task will be saved for later in the backlog' 
+                  : initialStage === 'plan'
+                  ? 'Task will start planning immediately'
+                  : initialStage === 'select'
+                  ? 'Task will skip planning and start with file selection'
+                  : 'Task will be ready to start'}
+              </p>
             </div>
-            <p className="text-xs text-muted mt-1">
-              {initialStage === 'backlog' 
-                ? 'Task will be saved for later in the backlog' 
-                : initialStage === 'plan'
-                ? 'Task will start planning immediately'
-                : 'Task will be ready to start'}
-            </p>
-          </div>
+          )}
 
           {/* Project Selection */}
           <div>
@@ -658,76 +731,105 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({ onClose, defau
             )}
           </div>
 
-          {/* Skip Planning Option */}
-          <div 
-            className="p-4 rounded-lg"
-            style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border-secondary)' }}
-          >
-            <label className="flex items-center gap-3 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={skipPlanning}
-                onChange={(e) => setSkipPlanning(e.target.checked)}
-                className="w-5 h-5 rounded accent-[var(--accent)]"
-              />
-              <div>
-                <span className="text-sm font-medium text-primary">⏭ Skip Planning Stage</span>
-                <p className="text-xs text-muted mt-1">
-                  Go directly to file selection without AI-assisted planning
-                </p>
+          {/* Skip Options - Only shown in Advanced Mode */}
+          {!simpleMode && (
+            <>
+              {/* Skip Planning Option */}
+              <div 
+                className="p-4 rounded-lg"
+                style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border-secondary)' }}
+              >
+                <label className="flex items-center gap-3 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={skipPlanning}
+                    onChange={(e) => setSkipPlanning(e.target.checked)}
+                    className="w-5 h-5 rounded accent-[var(--accent)]"
+                  />
+                  <div>
+                    <span className="text-sm font-medium text-primary">⏭ Skip Planning Stage</span>
+                    <p className="text-xs text-muted mt-1">
+                      Go directly to file selection without AI-assisted planning
+                    </p>
+                  </div>
+                </label>
               </div>
-            </label>
-          </div>
 
-          {/* Skip Distribute Option - for simple tasks */}
-          <div 
-            className="p-4 rounded-lg"
-            style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border-secondary)' }}
-          >
-            <label className="flex items-center gap-3 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={skipDistribute}
-                onChange={(e) => setSkipDistribute(e.target.checked)}
-                className="w-5 h-5 rounded accent-[var(--warning)]"
-              />
-              <div>
-                <span className="text-sm font-medium text-primary">🎯 Simple Task (No Sub-Agents)</span>
-                <p className="text-xs text-muted mt-1">
-                  Skip distribution stage - run as single task without spawning child agents
-                </p>
+              {/* Skip Distribute Option - for simple tasks */}
+              <div 
+                className="p-4 rounded-lg"
+                style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border-secondary)' }}
+              >
+                <label className="flex items-center gap-3 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={skipDistribute}
+                    onChange={(e) => setSkipDistribute(e.target.checked)}
+                    className="w-5 h-5 rounded accent-[var(--warning)]"
+                  />
+                  <div>
+                    <span className="text-sm font-medium text-primary">🎯 Simple Task (No Sub-Agents)</span>
+                    <p className="text-xs text-muted mt-1">
+                      Skip distribution stage - run as single task without spawning child agents
+                    </p>
+                  </div>
+                </label>
               </div>
-            </label>
-          </div>
 
-          {/* Skip Review Option */}
-          <div 
-            className="p-4 rounded-lg"
-            style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border-secondary)' }}
-          >
-            <label className="flex items-center gap-3 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={skipReview}
-                onChange={(e) => setSkipReview(e.target.checked)}
-                className="w-5 h-5 rounded accent-[var(--danger)]"
-              />
-              <div>
-                <span className="text-sm font-medium text-primary">⚡ Skip Review Stage</span>
-                <p className="text-xs text-muted mt-1">
-                  Go directly to approval without code/architecture review
-                </p>
+              {/* Skip Review Option */}
+              <div 
+                className="p-4 rounded-lg"
+                style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border-secondary)' }}
+              >
+                <label className="flex items-center gap-3 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={skipReview}
+                    onChange={(e) => setSkipReview(e.target.checked)}
+                    className="w-5 h-5 rounded accent-[var(--danger)]"
+                  />
+                  <div>
+                    <span className="text-sm font-medium text-primary">⚡ Skip Review Stage</span>
+                    <p className="text-xs text-muted mt-1">
+                      Go directly to approval without code/architecture review
+                    </p>
+                  </div>
+                </label>
               </div>
-            </label>
-          </div>
+            </>
+          )}
 
           <div className="text-sm text-muted">
-            <p>The task will be created in the <strong className="text-primary">Create</strong> stage and automatically progress through:</p>
+            <p>The task will be created in the <strong className="text-primary">{
+              autoStartTasks 
+                ? (skipPlanning ? 'Select' : 'Plan')
+                : initialStage === 'backlog' 
+                  ? 'Backlog' 
+                  : initialStage === 'plan' 
+                    ? 'Plan' 
+                    : initialStage === 'select'
+                      ? 'Select'
+                      : 'Create'
+            }</strong> stage and automatically progress through:</p>
             <p className="mt-1 text-xs">
               {(() => {
-                const stages = ['Create'];
-                if (!skipPlanning) stages.push('Plan');
-                stages.push('Select');
+                const startStage = autoStartTasks 
+                  ? (skipPlanning && skipSelect ? 'work' : skipPlanning ? 'select' : 'plan')
+                  : initialStage;
+                
+                const stages: string[] = [];
+                if (startStage === 'backlog') {
+                  stages.push('Backlog');
+                }
+                if (startStage === 'create' || startStage === 'backlog') {
+                  stages.push('Create');
+                }
+                if (!skipPlanning && startStage !== 'select' && startStage !== 'work') {
+                  stages.push('Plan');
+                }
+                if (!skipSelect && startStage !== 'work') {
+                  stages.push('Select');
+                }
                 if (!skipDistribute) stages.push('Distribute');
                 stages.push('Work');
                 if (!skipReview) stages.push('Review');

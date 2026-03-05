@@ -149,7 +149,7 @@ export const AgentActivityPanel: React.FC<AgentActivityPanelProps> = ({ task, on
         </div>
       </div>
 
-      {viewMode === 'hierarchy' ? (
+{viewMode === 'hierarchy' ? (
         /* Hierarchy View - Shows agents as a tree */
         <div className="space-y-3">
           {allAgents.map((agent) => (
@@ -214,6 +214,145 @@ export const AgentActivityPanel: React.FC<AgentActivityPanelProps> = ({ task, on
                       <div className="stat-label">Reviews</div>
                     </div>
                   </div>
+
+                  {/* Last AI Request Debug Info - Enhanced */}
+                  {agent.task.lastAIRequest && (
+                    <div className="px-4 pb-4">
+                      <div 
+                        className={`rounded-lg overflow-hidden ${agent.task.lastAIRequest.error ? 'border-l-4 border-l-red-500' : 'border-l-4 border-l-blue-500'}`}
+                        style={{ 
+                          background: agent.task.lastAIRequest.error ? 'rgba(239,71,67,0.1)' : 'var(--bg-tertiary)',
+                          border: '1px solid var(--border-secondary)'
+                        }}
+                      >
+                        {/* Request Header */}
+                        <div className="p-3 flex items-center justify-between" style={{ background: 'var(--bg-elevated)' }}>
+                          <div className="flex items-center gap-2">
+                            <span className="text-lg">{agent.task.lastAIRequest.error ? '❌' : '🤖'}</span>
+                            <span className="font-semibold text-primary">Last AI Request</span>
+                            <span className="badge badge-info text-xs">{agent.task.lastAIRequest.stage}</span>
+                          </div>
+                          <div className="flex items-center gap-3">
+                            <span className="text-xs text-muted">
+                              {new Date(agent.task.lastAIRequest.timestamp).toLocaleTimeString()}
+                            </span>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                const debugInfo = JSON.stringify({
+                                  timestamp: agent.task.lastAIRequest?.timestamp,
+                                  stage: agent.task.lastAIRequest?.stage,
+                                  systemPrompt: agent.task.lastAIRequest?.systemPrompt,
+                                  userPrompt: agent.task.lastAIRequest?.userPrompt,
+                                  tools: agent.task.lastAIRequest?.tools,
+                                  totalTokensEstimate: agent.task.lastAIRequest?.totalTokensEstimate,
+                                  error: agent.task.lastAIRequest?.error
+                                }, null, 2);
+                                navigator.clipboard.writeText(debugInfo);
+                              }}
+                              className="btn btn-ghost text-xs px-2 py-1"
+                            >
+                              📋 Copy Full Request
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Error Display */}
+                        {agent.task.lastAIRequest.error && (
+                          <div className="px-3 py-2" style={{ background: 'rgba(239,71,67,0.2)' }}>
+                            <div className="text-xs text-danger font-mono break-all">
+                              {agent.task.lastAIRequest.error}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Stats Row */}
+                        <div className="p-3 flex flex-wrap items-center gap-4 text-xs border-t border-[var(--border-secondary)]">
+                          <div className="flex items-center gap-2">
+                            <span className="text-muted">Est:</span>
+                            <span className="font-semibold text-primary">~{agent.task.lastAIRequest.totalTokensEstimate.toLocaleString()}</span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-muted">In:</span>
+                            <span className="font-semibold text-primary">
+                              {agent.task.lastAIRequest.actualInputTokens !== undefined 
+                                ? agent.task.lastAIRequest.actualInputTokens.toLocaleString() 
+                                : '—'}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-muted">Out:</span>
+                            <span className="font-semibold text-primary">
+                              {agent.task.lastAIRequest.actualOutputTokens !== undefined 
+                                ? agent.task.lastAIRequest.actualOutputTokens.toLocaleString() 
+                                : '—'}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-muted">Tools:</span>
+                            <span className="font-semibold text-primary">{agent.task.lastAIRequest.tools.length}</span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-muted">Stage:</span>
+                            <span className="font-semibold text-primary">{agent.task.lastAIRequest.stage}</span>
+                          </div>
+                        </div>
+
+                        {/* Expandable Details */}
+                        <details className="border-t border-[var(--border-secondary)]">
+                          <summary className="p-3 cursor-pointer text-sm text-secondary hover:text-primary hover:bg-[var(--bg-card-hover)] transition-colors select-none">
+                            📜 View System Prompt
+                          </summary>
+                          <div className="p-3 max-h-40 overflow-y-auto" style={{ background: 'var(--bg-primary)' }}>
+                            <pre className="text-xs font-mono whitespace-pre-wrap text-muted">
+                              {agent.task.lastAIRequest.systemPrompt}
+                            </pre>
+                          </div>
+                        </details>
+
+                        <details className="border-t border-[var(--border-secondary)]">
+                          <summary className="p-3 cursor-pointer text-sm text-secondary hover:text-primary hover:bg-[var(--bg-card-hover)] transition-colors select-none">
+                            💬 View User Prompt
+                          </summary>
+                          <div className="p-3 max-h-40 overflow-y-auto" style={{ background: 'var(--bg-primary)' }}>
+                            <pre className="text-xs font-mono whitespace-pre-wrap text-muted">
+                              {agent.task.lastAIRequest.userPrompt}
+                            </pre>
+                          </div>
+                        </details>
+
+                        <details className="border-t border-[var(--border-secondary)]">
+                          <summary className="p-3 cursor-pointer text-sm text-secondary hover:text-primary hover:bg-[var(--bg-card-hover)] transition-colors select-none">
+                            🔧 View Tools ({agent.task.lastAIRequest.tools.length})
+                          </summary>
+                          <div className="p-3 flex flex-wrap gap-1 max-h-32 overflow-y-auto" style={{ background: 'var(--bg-primary)' }}>
+                            {agent.task.lastAIRequest.tools.map((tool, index) => (
+                              <span
+                                key={index}
+                                className="px-2 py-0.5 rounded text-xs font-mono"
+                                style={{ background: 'var(--bg-tertiary)', color: 'var(--text-muted)' }}
+                              >
+                                {tool}
+                              </span>
+                            ))}
+                          </div>
+                        </details>
+
+                        <details className="border-t border-[var(--border-secondary)]">
+                          <summary className="p-3 cursor-pointer text-sm text-secondary hover:text-primary hover:bg-[var(--bg-card-hover)] transition-colors select-none">
+                            🤖 View AI Response
+                          </summary>
+                          <div className="p-3 max-h-40 overflow-y-auto" style={{ background: 'var(--bg-primary)' }}>
+                            {agent.task.lastAIResponse ? (
+                              <MarkdownRenderer content={agent.task.lastAIResponse} className="text-xs" />
+                            ) : (
+                              <p className="text-xs text-muted italic">No response recorded yet</p>
+                            )}
+                          </div>
+                        </details>
+                      </div>
+                    </div>
+                  )}
 
                   {/* Actions List */}
                   <div className="max-h-[400px] overflow-y-auto p-4 space-y-2">

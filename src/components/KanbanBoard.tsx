@@ -48,6 +48,25 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
   const [planningTask, setPlanningTask] = useState<Task | null>(null);
   const [agentSelectionTask, setAgentSelectionTask] = useState<{ task: Task; stage: 'plan' | 'review' } | null>(null);
   
+  // Task creation mode settings
+  const [simpleMode, setSimpleMode] = useState(() => {
+    const saved = localStorage.getItem('taskCreationSimpleMode');
+    return saved ? JSON.parse(saved) : false;
+  });
+  const [autoStartTasks, setAutoStartTasks] = useState(() => {
+    const saved = localStorage.getItem('taskCreationAutoStart');
+    return saved ? JSON.parse(saved) : false;
+  });
+  
+  // Persist mode settings
+  useEffect(() => {
+    localStorage.setItem('taskCreationSimpleMode', JSON.stringify(simpleMode));
+  }, [simpleMode]);
+  
+  useEffect(() => {
+    localStorage.setItem('taskCreationAutoStart', JSON.stringify(autoStartTasks));
+  }, [autoStartTasks]);
+  
   // Collapsed columns state - initialize with null to detect first load
   const [collapsedColumns, setCollapsedColumns] = useState<Set<Stage> | null>(null);
   const [hasInitializedCollapse, setHasInitializedCollapse] = useState(false);
@@ -395,6 +414,44 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
         </div>
         
         <div className="flex items-center gap-3">
+          {/* Task Creation Mode Toggles */}
+          <div 
+            className="flex items-center gap-3 px-3 py-1.5 rounded-lg"
+            style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border-secondary)' }}
+          >
+            <div className="flex rounded-lg overflow-hidden" style={{ border: '1px solid var(--border-secondary)' }}>
+              <button
+                onClick={() => setSimpleMode(false)}
+                className={`px-2.5 py-1 text-xs font-medium transition-all ${
+                  !simpleMode ? 'text-black' : 'text-secondary hover:text-primary'
+                }`}
+                style={{ background: !simpleMode ? 'var(--accent-primary)' : 'transparent' }}
+                title="Advanced mode: Full control over planning, distribution, and review stages"
+              >
+                ⚙️ Advanced
+              </button>
+              <button
+                onClick={() => setSimpleMode(true)}
+                className={`px-2.5 py-1 text-xs font-medium transition-all ${
+                  simpleMode ? 'text-black' : 'text-secondary hover:text-primary'
+                }`}
+                style={{ background: simpleMode ? 'var(--accent-primary)' : 'transparent' }}
+                title="Simple mode: Skip planning, distribution, and review for quick execution"
+              >
+                🚀 Simple
+              </button>
+            </div>
+            <label className="flex items-center gap-1.5 cursor-pointer" title="Auto-start tasks in Plan or Select stage">
+              <input
+                type="checkbox"
+                checked={autoStartTasks}
+                onChange={(e) => setAutoStartTasks(e.target.checked)}
+                className="w-3.5 h-3.5 rounded accent-[var(--accent-primary)]"
+              />
+              <span className="text-xs text-secondary">Auto Start</span>
+            </label>
+          </div>
+          
           <button
             onClick={() => setShowSettingsModal(true)}
             className="btn btn-ghost p-2.5"
@@ -578,6 +635,8 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
         <CreateTaskModal
           onClose={() => setShowCreateModal(false)}
           defaultProjectId={currentProjectId}
+          simpleMode={simpleMode}
+          autoStartTasks={autoStartTasks}
         />
       )}
 

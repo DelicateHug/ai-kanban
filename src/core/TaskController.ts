@@ -3,7 +3,7 @@ import { useTaskStore, getNextStage } from './TaskStore';
 import { useFileLockStore } from './FileLockManager';
 import { WorkerPool, type WorkerPoolCallbacks } from './WorkerPool';
 import { appendHistoryEntry } from './HistoryManager';
-import { getWorkerCount, getMaxTurnCount, getPlanningAutoApprove } from './config';
+import { getWorkerCount, getMaxTurnCount, getPlanningAutoApprove, addConfigChangeListener } from './config';
 import { addPlanningMessage } from './TaskStore';
 
 // Instruction files per stage (would be loaded from file system in production)
@@ -17,10 +17,53 @@ const STAGE_INSTRUCTIONS: Record<string, string[]> = {
   approval: ['approval/final-approval.md']
 };
 
+// Cache for loaded instruction file contents
+const instructionFileCache = new Map<string, string>();
+
+// Load instruction file content from backend
+async function loadInstructionFile(filePath: string): Promise<string> {
+  // Check cache first
+  if (instructionFileCache.has(filePath)) {
+    return instructionFileCache.get(filePath)!;
+  }
+
+  try {
+    const response = await fetch('http://localhost:8765/api/file/read', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: filePath })
+    });
+
+    if (!response.ok) {
+      console.warn(`[TaskController] Failed to load instruction file ${filePath}: ${response.status}`);
+      return `[Could not load instructions from ${filePath}]`;
+    }
+
+    const data = await response.json();
+    if (data.success && data.content) {
+      // Cache the content
+      instructionFileCache.set(filePath, data.content);
+      return data.content;
+    }
+
+    return `[Could not load instructions from ${filePath}]`;
+  } catch (error) {
+    console.warn(`[TaskController] Error loading instruction file ${filePath}:`, error);
+    return `[Could not load instructions from ${filePath}]`;
+  }
+}
+
+// Load multiple instruction files and combine their contents
+async function loadInstructionFiles(filePaths: string[]): Promise<string> {
+  const contents = await Promise.all(filePaths.map(loadInstructionFile));
+  return contents.join('\n\n---\n\n');
+}
+
 class TaskController {
   private workerPool: WorkerPool | null = null;
   private isRunning = false;
   private processingTasks = new Set<string>();
+  private configChangeUnsubscribe: (() => void) | null = null;
 
   async initialize(): Promise<void> {
     const workerCount = getWorkerCount();
@@ -37,12 +80,35 @@ class TaskController {
     this.workerPool = new WorkerPool(workerCount, callbacks);
     await this.workerPool.initialize();
     
+    // Listen for config changes to resize the worker pool
+    this.configChangeUnsubscribe = addConfigChangeListener((newConfig, oldConfig) => {
+      if (newConfig.workers.count !== oldConfig.workers.count) {
+        console.log(`[TaskController] Worker count changed from ${oldConfig.workers.count} to ${newConfig.workers.count}`);
+        this.handleWorkerCountChange(newConfig.workers.count);
+      }
+    });
+    
     console.log(`TaskController initialized with ${workerCount} workers`);
   }
 
+  private async handleWorkerCountChange(newCount: number): Promise<void> {
+    if (this.workerPool) {
+      try {
+        await this.workerPool.resizePool(newCount);
+        console.log(`[TaskController] Worker pool resized to ${newCount} workers`);
+      } catch (error) {
+        console.error('[TaskController] Failed to resize worker pool:', error);
+      }
+    }
+  }
+
   start(): void {
-    if (this.isRunning) return;
+    if (this.isRunning) {
+      console.log('[TaskController] Already running, skipping start');
+      return;
+    }
     this.isRunning = true;
+    console.log('[TaskController] Starting process loop...');
     this.processLoop();
     console.log('TaskController started');
   }
@@ -56,11 +122,22 @@ class TaskController {
     this.stop();
     this.workerPool?.shutdown();
     this.workerPool = null;
+    if (this.configChangeUnsubscribe) {
+      this.configChangeUnsubscribe();
+      this.configChangeUnsubscribe = null;
+    }
     console.log('TaskController shutdown');
   }
 
   private async processLoop(): Promise<void> {
+    console.log('[TaskController] Process loop started, isRunning:', this.isRunning);
+    let loopCount = 0;
     while (this.isRunning) {
+      loopCount++;
+      if (loopCount % 20 === 1) { // Log every 10 seconds (20 * 500ms)
+        console.log(`[TaskController] Process loop iteration ${loopCount}, isRunning: ${this.isRunning}`);
+      }
+      
       // Clean up any stuck tasks first
       this.cleanupStuckTasks();
       
@@ -68,6 +145,7 @@ class TaskController {
       // Wait a bit before checking again
       await new Promise((resolve) => setTimeout(resolve, 500));
     }
+    console.log('[TaskController] Process loop ended');
   }
 
   /**
@@ -95,9 +173,19 @@ class TaskController {
   }
 
   private async processPendingTasks(): Promise<void> {
-    if (!this.workerPool) return;
+    if (!this.workerPool) {
+      console.log('[TaskController] No worker pool, skipping');
+      return;
+    }
 
     const idleWorkers = this.workerPool.getIdleWorkerCount();
+    const totalTasks = useTaskStore.getState().tasks.size;
+    
+    // Debug every 10 seconds
+    if (totalTasks > 0 && Date.now() % 10000 < 500) {
+      console.log(`[TaskController] processPendingTasks: ${totalTasks} tasks, ${idleWorkers} idle workers`);
+    }
+    
     if (idleWorkers === 0) return;
 
     // Get tasks that can be processed
@@ -105,6 +193,9 @@ class TaskController {
     
     if (processableTasks.length > 0) {
       console.log(`[TaskController] Found ${processableTasks.length} processable tasks, ${idleWorkers} idle workers`);
+      processableTasks.forEach(task => {
+        console.log(`[TaskController]   - Task "${task.title}" in stage: ${task.currentStage}, status: ${task.status}`);
+      });
     }
     
     for (const task of processableTasks) {
@@ -132,6 +223,14 @@ class TaskController {
       return;
     }
     
+    // Handle skipSelect - if task should skip select, move directly to work (or distribute if not skipped)
+    if (task.skipSelect && stage === 'select') {
+      const nextStage = task.skipDistribute ? 'work' : 'distribute';
+      console.log(`[TaskController] Task ${task.id} has skipSelect=true, skipping to ${nextStage} stage`);
+      useTaskStore.getState().moveToStage(task.id, nextStage);
+      return;
+    }
+    
     // Handle skipDistribute - if task should skip distribute, move directly to work
     if (task.skipDistribute && stage === 'distribute') {
       console.log(`[TaskController] Task ${task.id} has skipDistribute=true, skipping to work stage`);
@@ -155,35 +254,45 @@ class TaskController {
     
     // For plan stage, use the task's selected planning files; otherwise use default stage instructions
     // For review stage, use the task's selected review files
-    let instructions: string[];
+    let instructionFilePaths: string[];
     if (stage === 'plan' && task.planningFiles && task.planningFiles.length > 0) {
-      instructions = task.planningFiles;
+      instructionFilePaths = task.planningFiles;
     } else if (stage === 'review' && task.reviewFiles && task.reviewFiles.length > 0) {
-      instructions = task.reviewFiles;
+      instructionFilePaths = task.reviewFiles;
     } else {
-      instructions = STAGE_INSTRUCTIONS[stage] || [];
+      instructionFilePaths = STAGE_INSTRUCTIONS[stage] || [];
     }
 
-    if (!instructions || instructions.length === 0) {
+    if (!instructionFilePaths || instructionFilePaths.length === 0) {
       console.warn(`[TaskController] No instructions for stage: ${stage}`);
-      // For plan stage with no files, still proceed but with a default message
-      if (stage === 'plan') {
-        instructions = ['Please analyze the task and create a plan.'];
+      // Allow plan and work stages to proceed without instructions
+      if (stage === 'plan' || stage === 'work') {
+        instructionFilePaths = [];
       } else {
         return;
       }
     }
 
-    console.log(`[TaskController] Instructions for ${stage}:`, instructions);
+    console.log(`[TaskController] Instruction files for ${stage}:`, instructionFilePaths);
 
     // For review stage, spawn multiple workers (one per instruction file)
     if (stage === 'review') {
-      this.assignReviewTasks(task, instructions);
+      this.assignReviewTasks(task, instructionFilePaths);
       return;
     }
 
-    // For plan stage, include any existing chat context
-    let combinedInstructions = instructions.join('\n\n---\n\n');
+    // Load the actual instruction file contents from disk
+    let combinedInstructions: string;
+    if (instructionFilePaths.length > 0) {
+      combinedInstructions = await loadInstructionFiles(instructionFilePaths);
+    } else {
+      // Default instructions when no files are configured
+      if (stage === 'work') {
+        combinedInstructions = 'Execute the task as described. Use available tools to complete the work.';
+      } else {
+        combinedInstructions = 'Please analyze the task and create a plan.';
+      }
+    }
     
     if (stage === 'plan' && task.planningChat.length > 0) {
       const chatContext = task.planningChat
@@ -203,16 +312,24 @@ class TaskController {
     }
   }
 
-  private assignReviewTasks(task: Task, instructions: string[]): void {
+  private async assignReviewTasks(task: Task, instructionFilePaths: string[]): Promise<void> {
     if (!this.workerPool) return;
 
     this.processingTasks.add(task.id);
     useTaskStore.getState().setTaskStatus(task.id, 'processing');
 
+    // Load instruction contents for each file
+    const instructionContents = await Promise.all(
+      instructionFilePaths.map(async (filePath) => ({
+        filePath,
+        content: await loadInstructionFile(filePath)
+      }))
+    );
+
     // Create a review task for each instruction file
-    const pendingReviews = instructions.map((instruction, index) => ({
-      instruction,
-      instructionFile: instruction,
+    const pendingReviews = instructionContents.map((inst, index) => ({
+      instruction: inst.content,
+      instructionFile: inst.filePath,
       reviewerId: `review-${index + 1}`,
       completed: false
     }));
@@ -326,6 +443,12 @@ class TaskController {
         return;
       }
 
+      // Handle select stage - extract and assign selected files
+      if (stage === 'select') {
+        this.handleSelectComplete(taskId, result);
+        return;
+      }
+
       // Increment turn count for work stage
       if (stage === 'work') {
         useTaskStore.getState().incrementTurnCount(taskId);
@@ -408,6 +531,58 @@ class TaskController {
       }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Failed to process plan result';
+      useTaskStore.getState().moveTaskToStopped(taskId, errorMessage);
+    }
+  }
+
+  private handleSelectComplete(taskId: string, result: unknown): void {
+    const task = useTaskStore.getState().getTask(taskId);
+    if (!task) return;
+
+    try {
+      // Parse the result to get selected files
+      const selectResult = result as {
+        selectedFiles?: Array<{ path: string; relevance?: string; reason?: string; access?: string } | string>;
+        finalSelection?: string[];
+      };
+
+      // Extract file paths - handle both object format and simple string array
+      let filePaths: string[] = [];
+      
+      if (selectResult?.selectedFiles && Array.isArray(selectResult.selectedFiles)) {
+        filePaths = selectResult.selectedFiles.map(f => 
+          typeof f === 'string' ? f : f.path
+        ).filter(Boolean);
+      } else if (selectResult?.finalSelection && Array.isArray(selectResult.finalSelection)) {
+        // Also accept finalSelection from scope-validation output
+        filePaths = selectResult.finalSelection.filter(Boolean);
+      }
+
+      if (filePaths.length > 0) {
+        useTaskStore.getState().setAssignedFiles(taskId, filePaths);
+        
+        appendHistoryEntry(
+          taskId,
+          'action',
+          'select',
+          `Selected ${filePaths.length} files for work phase: ${filePaths.join(', ')}`
+        );
+      } else {
+        appendHistoryEntry(
+          taskId,
+          'action',
+          'select',
+          'Warning: No files were selected for work phase. AI may not be able to make targeted changes.'
+        );
+      }
+
+      // Move to next stage (distribute)
+      const nextStage = getNextStage('select');
+      if (nextStage) {
+        useTaskStore.getState().moveToStage(taskId, nextStage);
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Failed to process select result';
       useTaskStore.getState().moveTaskToStopped(taskId, errorMessage);
     }
   }
@@ -638,8 +813,12 @@ ${overallVerdict}
     if (!this.workerPool) {
       return { total: 0, idle: 0, busy: 0 };
     }
+    // Use actual worker count from the pool, not from config
+    // This reflects the real state including during resize operations
+    const allWorkers = this.workerPool.getAllWorkers();
+    const activeWorkers = allWorkers.filter(w => w.status !== 'shutdown');
     return {
-      total: getWorkerCount(),
+      total: activeWorkers.length,
       idle: this.workerPool.getIdleWorkerCount(),
       busy: this.workerPool.getBusyWorkerCount()
     };

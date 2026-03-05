@@ -302,7 +302,7 @@ function buildSystemPrompt(task, stage, instructions) {
     'summarize': 'You are an AI assistant tasked with summarizing context for a task. Provide a concise summary of the task requirements and any relevant context.',
     'plan': 'You are an AI assistant that creates detailed implementation plans. Analyze the task and create a structured plan with clear steps.',
     'distribute': 'You are an AI assistant that breaks down tasks into subtasks and distributes work. Return a JSON object with a "subtasks" array containing objects with "title" and "description" fields.',
-    'select': 'You are an AI assistant that selects relevant files for a task. Analyze the task requirements and return a JSON object with "selectedFiles" array.',
+    'select': 'You are an AI file selection agent. Your job is to USE THE AVAILABLE TOOLS to search the codebase and identify all relevant files for the task. You MUST use grep_search to find where relevant code/text exists, and list_directory to explore the project structure. Do NOT guess - search first! After searching, return a JSON object with "selectedFiles" array containing objects with "path", "relevance", and "reason" fields.',
     'work': 'You are an AI coding assistant. Execute the given task and provide detailed output. If the task involves running commands, describe what the commands would output. For coding tasks, provide the actual code or changes.',
     'review': 'You are a code reviewer. Review the work done and provide feedback. Return a JSON object with "verdict" (approve/reject/request-changes), "score" (0-100), and "output" (detailed feedback).',
     'approval': 'You are a final approver. Review the completed work and provide a recommendation. Return a JSON object with "recommendation" (approve/reject) and "summary".'
@@ -326,11 +326,24 @@ function buildUserPrompt(task, stage, instructions) {
     prompt += '\\n## Working Context:\\n' + task.workingContext + '\\n';
   }
   
+  // For select stage, include the project path so AI knows where to search
+  if (stage === 'select' && task.projectPath) {
+    prompt += '\\n## Project Root Path:\\n' + task.projectPath + '\\n';
+    prompt += '\\nIMPORTANT: Use this path with list_directory and grep_search tools to explore the codebase.\\n';
+  }
+  
   if (task.assignedFiles && task.assignedFiles.length > 0) {
     prompt += '\\n## Assigned Files:\\n' + task.assignedFiles.join('\\n') + '\\n';
   }
   
   prompt += '\\n## Your Task:\\nProcess this ' + stage + ' stage for the task described above.';
+  
+  // Add specific instructions for select stage
+  if (stage === 'select') {
+    prompt += '\\n\\nSTEP 1: Use list_directory to see the project structure.\\n';
+    prompt += 'STEP 2: Use grep_search to find files containing relevant terms from the task.\\n';
+    prompt += 'STEP 3: Return JSON with selectedFiles array after searching.';
+  }
   
   return prompt;
 }
@@ -403,6 +416,73 @@ export class WorkerPool {
     }
 
     await Promise.all(promises);
+  }
+
+  /**
+   * Dynamically resize the worker pool.
+   * - If newCount > current: spawn new workers
+   * - If newCount < current: gracefully stop idle workers first, mark busy workers for termination
+   */
+  async resizePool(newCount: number): Promise<void> {
+    if (newCount < 1) {
+      throw new Error('Worker count must be >= 1');
+    }
+
+    const currentCount = this.workers.size;
+    const oldWorkerCount = this.workerCount;
+    this.workerCount = newCount;
+
+    console.log(`[WorkerPool] Resizing pool from ${currentCount} to ${newCount} workers`);
+
+    if (newCount > currentCount) {
+      // Need to spawn more workers
+      const toSpawn = newCount - currentCount;
+      const promises: Promise<void>[] = [];
+      for (let i = 0; i < toSpawn; i++) {
+        promises.push(this.spawnWorker());
+      }
+      await Promise.all(promises);
+      console.log(`[WorkerPool] Spawned ${toSpawn} new workers`);
+    } else if (newCount < currentCount) {
+      // Need to reduce workers - stop idle ones first
+      const toRemove = currentCount - newCount;
+      let removed = 0;
+
+      // First pass: remove idle workers
+      for (const [id, instance] of this.workers) {
+        if (removed >= toRemove) break;
+        if (instance.status === 'idle') {
+          instance.worker.postMessage({ type: 'SHUTDOWN' });
+          instance.status = 'shutdown';
+          this.workers.delete(id);
+          removed++;
+          console.log(`[WorkerPool] Removed idle worker ${instance.name}`);
+        }
+      }
+
+      // If we still need to remove more, mark busy workers for removal when they finish
+      if (removed < toRemove) {
+        const remainingToRemove = toRemove - removed;
+        let marked = 0;
+        for (const [, instance] of this.workers) {
+          if (marked >= remainingToRemove) break;
+          if (instance.status === 'busy') {
+            // Mark for termination after current task completes
+            (instance as WorkerInstance & { pendingShutdown?: boolean }).pendingShutdown = true;
+            marked++;
+            console.log(`[WorkerPool] Marked busy worker ${instance.name} for shutdown after task completion`);
+          }
+        }
+      }
+
+      console.log(`[WorkerPool] Removed ${removed} workers immediately, pool now has ${this.workers.size} workers (target: ${newCount})`);
+    }
+
+    console.log(`[WorkerPool] Pool resize complete: ${oldWorkerCount} -> ${this.workerCount} (actual: ${this.workers.size})`);
+  }
+
+  getTargetWorkerCount(): number {
+    return this.workerCount;
   }
 
   private async spawnWorker(): Promise<void> {
@@ -495,6 +575,13 @@ export class WorkerPool {
           completeData?.stage || 'work',
           completeData?.result
         );
+        // Check if this worker was marked for shutdown during resize
+        if ((instance as WorkerInstance & { pendingShutdown?: boolean }).pendingShutdown) {
+          console.log(`[WorkerPool] Shutting down worker ${instance.name} after task completion (pool resize)`);
+          instance.worker.postMessage({ type: 'SHUTDOWN' });
+          instance.status = 'shutdown';
+          this.workers.delete(workerId);
+        }
         break;
 
       case 'TASK_FAILED':
@@ -507,6 +594,13 @@ export class WorkerPool {
           failedData?.stage || 'work',
           message.error || 'Unknown error'
         );
+        // Check if this worker was marked for shutdown during resize
+        if ((instance as WorkerInstance & { pendingShutdown?: boolean }).pendingShutdown) {
+          console.log(`[WorkerPool] Shutting down worker ${instance.name} after task failure (pool resize)`);
+          instance.worker.postMessage({ type: 'SHUTDOWN' });
+          instance.status = 'shutdown';
+          this.workers.delete(workerId);
+        }
         break;
 
       case 'TASK_WAITING':
@@ -539,9 +633,18 @@ export class WorkerPool {
         instance.status = 'busy';
         instance.currentTaskId = task.id;
 
+        // Enhance task with project path for the select stage
+        let enhancedTask = task;
+        if (task.projectId) {
+          const project = useProjectStore.getState().getProject(task.projectId);
+          if (project) {
+            enhancedTask = { ...task, projectPath: project.path };
+          }
+        }
+
         instance.worker.postMessage({
           type: 'PROCESS_TASK',
-          task,
+          task: enhancedTask,
           stage,
           instructions
         });
@@ -583,7 +686,7 @@ export class WorkerPool {
             'read_file', 'write_file', 'append_file', 'delete_file',
             'list_directory', 'create_directory', 'move_file', 'copy_file',
             'search_files', 'search_in_file', 'replace_in_file', 'insert_at_line',
-            'file_exists', 'get_file_info'
+            'file_exists', 'get_file_info', 'grep_search'
           ];
           
           // Validate path access if this is a path-based tool
@@ -707,13 +810,49 @@ export class WorkerPool {
           
           const result = await response.json();
           
+          // Build a more informative log message that includes key result data
+          let logMessage = `Tool ${toolName}: ${result.success ? 'success' : 'failed'}`;
+          
+          // For successful tool calls, include relevant result data in the log message
+          if (result.success && result.data) {
+            const data = result.data;
+            // Show key result values inline for common tools
+            if (toolName === 'get_hostname' && data.hostname) {
+              logMessage += ` - hostname: ${data.hostname}`;
+            } else if (toolName === 'execute_command' && data.output) {
+              const output = data.output.trim();
+              const truncated = output.length > 200 ? output.slice(0, 200) + '...' : output;
+              logMessage += `\nOutput:\n${truncated}`;
+            } else if (toolName === 'get_system_info' && data.hostname) {
+              logMessage += ` - ${data.hostname} (${data.platform || 'unknown platform'})`;
+            } else if (toolName === 'read_file' && data.content) {
+              const lines = data.content.split('\n').length;
+              logMessage += ` - ${lines} lines`;
+            } else if (toolName === 'list_directory' && data.entries) {
+              logMessage += ` - ${data.entries.length} entries`;
+            } else if (toolName === 'grep_search' && data.matches) {
+              logMessage += ` - ${data.matches.length} matches`;
+            } else if (typeof data === 'object' && Object.keys(data).length <= 5) {
+              // For simple result objects, show key-value pairs
+              const summary = Object.entries(data)
+                .filter(([, v]) => typeof v !== 'object' && String(v).length < 100)
+                .map(([k, v]) => `${k}: ${v}`)
+                .join(', ');
+              if (summary) {
+                logMessage += ` - ${summary}`;
+              }
+            }
+          } else if (!result.success && result.error) {
+            logMessage += ` - ${result.error}`;
+          }
+          
           // Log tool call and result as single action
           this.callbacks.onLogEntry(
             workerId,
             instance.currentTaskId || '',
             stage,
             'action',
-            `Tool ${toolName}: ${result.success ? 'success' : 'failed'}`,
+            logMessage,
             { tool: toolName, input, result }
           );
           
@@ -747,6 +886,30 @@ export class WorkerPool {
                 contentBefore: contentBefore,
                 contentAfter: undefined,
                 diff: generateUnifiedDiff(contentBefore, undefined, inputObjForLock.path)
+              });
+            } else if (toolName === 'replace_in_file' && inputObjForLock.path) {
+              // Read the file content after replacement to get the new state
+              const contentAfter = await getFileSnapshot(inputObjForLock.path);
+              const replaceInput = input as { searchPattern?: string };
+              useTaskStore.getState().addFileChange(instance.currentTaskId, {
+                file: inputObjForLock.path,
+                action: 'modified',
+                description: `Text replaced via replace_in_file tool${replaceInput.searchPattern ? ` (pattern: ${replaceInput.searchPattern})` : ''}`,
+                contentBefore: contentBefore,
+                contentAfter: contentAfter,
+                diff: generateUnifiedDiff(contentBefore, contentAfter, inputObjForLock.path)
+              });
+            } else if (toolName === 'insert_at_line' && inputObjForLock.path) {
+              // Read the file content after insertion to get the new state
+              const contentAfter = await getFileSnapshot(inputObjForLock.path);
+              const insertInput = input as { lineNumber?: number };
+              useTaskStore.getState().addFileChange(instance.currentTaskId, {
+                file: inputObjForLock.path,
+                action: 'modified',
+                description: `Content inserted${insertInput.lineNumber ? ` at line ${insertInput.lineNumber}` : ''} via insert_at_line tool`,
+                contentBefore: contentBefore,
+                contentAfter: contentAfter,
+                diff: generateUnifiedDiff(contentBefore, contentAfter, inputObjForLock.path)
               });
             }
           }
@@ -803,7 +966,38 @@ export class WorkerPool {
       
       // Build messages and call AI with tools
       const messages = buildMessages(enhancedSystemPrompt, userPrompt);
+      
+      // Save last AI request for debugging
+      if (instance.currentTaskId) {
+        const estimatedTokens = enhancedSystemPrompt.length / 4 + userPrompt.length / 4; // Rough estimate
+        useTaskStore.getState().setLastAIRequest(instance.currentTaskId, {
+          timestamp: new Date().toISOString(),
+          stage,
+          systemPrompt: enhancedSystemPrompt,
+          userPrompt,
+          tools: tools.map(t => t.name),
+          totalTokensEstimate: Math.round(estimatedTokens)
+        });
+      }
+      
       const response = await client.chat(messages, tools, toolExecutor);
+
+      // Save last AI response for debugging
+      if (instance.currentTaskId && response.content) {
+        useTaskStore.getState().setLastAIResponse(instance.currentTaskId, response.content);
+      }
+
+      // Update last AI request with actual token usage
+      if (instance.currentTaskId && response.tokensUsed) {
+        const existingRequest = useTaskStore.getState().getTask(instance.currentTaskId)?.lastAIRequest;
+        if (existingRequest) {
+          useTaskStore.getState().setLastAIRequest(instance.currentTaskId, {
+            ...existingRequest,
+            actualInputTokens: response.tokensUsed.prompt,
+            actualOutputTokens: response.tokensUsed.completion
+          });
+        }
+      }
 
       // Track cost for this AI call
       if (instance.currentTaskId && response.tokensUsed) {
@@ -828,11 +1022,24 @@ export class WorkerPool {
         result: response
       });
     } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'AI request failed';
+      
+      // Update last AI request with error
+      if (instance.currentTaskId) {
+        const existingRequest = useTaskStore.getState().getTask(instance.currentTaskId)?.lastAIRequest;
+        if (existingRequest) {
+          useTaskStore.getState().setLastAIRequest(instance.currentTaskId, {
+            ...existingRequest,
+            error: errorMessage
+          });
+        }
+      }
+      
       // Send error back to worker
       instance.worker.postMessage({
         type: 'AI_RESPONSE',
         requestId,
-        error: error instanceof Error ? error.message : 'AI request failed'
+        error: errorMessage
       });
     }
   }

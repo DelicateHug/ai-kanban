@@ -175,19 +175,27 @@ export const KanbanColumn: React.FC<KanbanColumnProps> = ({
       </div>
 
       {/* Tasks */}
-      <div className="flex-1 p-3 space-y-3 overflow-y-auto max-h-[calc(100vh-220px)]">
+      <div className="flex-1 p-3 space-y-4 overflow-y-auto max-h-[calc(100vh-220px)]">
         {tasks.length === 0 ? (
           <div className="text-center py-10 text-muted">
             <div className="text-3xl mb-2 opacity-50">📭</div>
             <p className="text-sm">No tasks</p>
           </div>
         ) : (
-          tasks.map((task) => (
-            <TaskCard
-              key={task.id}
-              task={task}
-              onClick={() => onTaskClick(task)}
-            />
+          tasks.map((task, index) => (
+            <div key={task.id} className="relative">
+              {/* Visual separator line between tasks */}
+              {index > 0 && (
+                <div 
+                  className="absolute -top-2 left-4 right-4 h-px" 
+                  style={{ background: 'var(--border-accent)' }}
+                />
+              )}
+              <TaskCard
+                task={task}
+                onClick={() => onTaskClick(task)}
+              />
+            </div>
           ))
         )}
       </div>

@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { subscribeWithSelector } from 'zustand/middleware';
 import { v4 as uuidv4 } from 'uuid';
-import type { Task, Stage, TaskStatus, Review, FileChange, PlanningChatMessage } from './types';
+import type { Task, Stage, TaskStatus, Review, FileChange, PlanningChatMessage, LastAIRequest } from './types';
 import { STAGE_FLOW, HUMAN_GATE_STAGES, PROCESSABLE_STAGES } from './types';
 import { appendHistoryEntry, initializeHistory } from './HistoryManager';
 import { shouldSummarize, buildTaskContext, estimateTokens } from './ContextManager';
@@ -13,7 +13,7 @@ interface TaskStore {
   processingQueue: string[];
   
   // Actions
-  createTask: (title: string, description: string, planningFiles?: string[], reviewFiles?: string[], allowedMcpServers?: string[], skipPlanning?: boolean, skipDistribute?: boolean, skipReview?: boolean, projectId?: string, allowExternalAccess?: boolean, initialStage?: Stage) => Task;
+  createTask: (title: string, description: string, planningFiles?: string[], reviewFiles?: string[], allowedMcpServers?: string[], skipPlanning?: boolean, skipSelect?: boolean, skipDistribute?: boolean, skipReview?: boolean, projectId?: string, allowExternalAccess?: boolean, initialStage?: Stage) => Task;
   deleteTask: (taskId: string) => void;
   updateTask: (taskId: string, updates: Partial<Task>) => void;
   moveToStage: (taskId: string, stage: Stage) => void;
@@ -25,6 +25,8 @@ interface TaskStore {
   setTaskStatus: (taskId: string, status: TaskStatus) => void;
   addCost: (taskId: string, inputTokens: number, outputTokens: number, cost: number) => void;
   setFinalOutput: (taskId: string, output: string) => void;
+  setLastAIRequest: (taskId: string, request: LastAIRequest) => void;
+  setLastAIResponse: (taskId: string, response: string) => void;
   
   // Child task actions
   createChildTask: (parentId: string, title: string, description: string, index: number) => Task | null;
@@ -69,10 +71,14 @@ export const useTaskStore = create<TaskStore>()(
     ]),
     processingQueue: [],
 
-    createTask: (title: string, description: string, planningFiles?: string[], reviewFiles?: string[], allowedMcpServers?: string[], skipPlanning?: boolean, skipDistribute?: boolean, skipReview?: boolean, projectId?: string, allowExternalAccess?: boolean, initialStage?: Stage): Task => {
+    createTask: (title: string, description: string, planningFiles?: string[], reviewFiles?: string[], allowedMcpServers?: string[], skipPlanning?: boolean, skipSelect?: boolean, skipDistribute?: boolean, skipReview?: boolean, projectId?: string, allowExternalAccess?: boolean, initialStage?: Stage): Task => {
       const id = uuidv4();
       const now = new Date().toISOString();
       const targetStage = initialStage || 'create';
+      
+      // If task skips planning and starts at or after select stage, mark planning as approved
+      const planningStagesCompleted = ['select', 'distribute', 'work', 'review', 'approval', 'complete'];
+      const shouldAutoApprovePlanning = Boolean(skipPlanning && planningStagesCompleted.includes(targetStage));
       
       const task: Task = {
         id,
@@ -87,15 +93,16 @@ export const useTaskStore = create<TaskStore>()(
         reviews: [],
         reviewSynthesis: '',
         planningChat: [],
-        planningApproved: false,
+        planningApproved: shouldAutoApprovePlanning,
         planningFiles: planningFiles || [],
         reviewFiles: reviewFiles || [],
         allowedMcpServers: allowedMcpServers || [],
         contextSummarized: false,
         currentTokens: 0,
-        skipPlanning: skipPlanning || false,
-        skipDistribute: skipDistribute || false,
-        skipReview: skipReview || false,
+        skipPlanning: skipPlanning ?? false,
+        skipSelect: skipSelect ?? false,
+        skipDistribute: skipDistribute ?? false,
+        skipReview: skipReview ?? false,
         totalCost: 0,
         totalInputTokens: 0,
         totalOutputTokens: 0,
@@ -450,6 +457,42 @@ export const useTaskStore = create<TaskStore>()(
       });
     },
 
+    setLastAIRequest: (taskId: string, request: LastAIRequest): void => {
+      set((state) => {
+        const task = state.tasks.get(taskId);
+        if (!task) return state;
+
+        const updatedTask: Task = {
+          ...task,
+          lastAIRequest: request,
+          updatedAt: new Date().toISOString()
+        };
+
+        const newTasks = new Map(state.tasks);
+        newTasks.set(taskId, updatedTask);
+
+        return { tasks: newTasks };
+      });
+    },
+
+    setLastAIResponse: (taskId: string, response: string): void => {
+      set((state) => {
+        const task = state.tasks.get(taskId);
+        if (!task) return state;
+
+        const updatedTask: Task = {
+          ...task,
+          lastAIResponse: response,
+          updatedAt: new Date().toISOString()
+        };
+
+        const newTasks = new Map(state.tasks);
+        newTasks.set(taskId, updatedTask);
+
+        return { tasks: newTasks };
+      });
+    },
+
     getTask: (taskId: string): Task | undefined => {
       return get().tasks.get(taskId);
     },
@@ -463,6 +506,17 @@ export const useTaskStore = create<TaskStore>()(
     getProcessableTasks: (): Task[] => {
       const state = get();
       const tasks: Task[] = [];
+      
+      // Debug: log all tasks and their statuses
+      const allTasks = Array.from(state.tasks.values());
+      if (allTasks.length > 0) {
+        console.log('[TaskStore] All tasks:', allTasks.map(t => ({
+          title: t.title,
+          stage: t.currentStage,
+          status: t.status,
+          inProcessableStage: PROCESSABLE_STAGES.includes(t.currentStage)
+        })));
+      }
       
       for (const stage of PROCESSABLE_STAGES) {
         const stageTasks = state.getTasksInStage(stage);
@@ -514,6 +568,7 @@ export const useTaskStore = create<TaskStore>()(
         contextSummarized: false,
         currentTokens: parent.currentTokens,
         skipPlanning: true,  // Child tasks always skip planning
+        skipSelect: true,    // Child tasks always skip select (files are assigned from parent)
         skipDistribute: true,  // Child tasks always skip distribute (they ARE the distributed work)
         skipReview: parent.skipReview || false,  // Inherit parent's skipReview setting
         totalCost: 0,
@@ -971,9 +1026,18 @@ export function deserializeTaskState(json: string): boolean {
 // Save tasks to localStorage
 export function saveTasksToStorage(): boolean {
   try {
+    const taskCount = useTaskStore.getState().tasks.size;
+    
+    // Don't save empty state - this can happen during HMR reload race conditions
+    // where the store is reset before cleanup runs
+    if (taskCount === 0) {
+      console.log('Skipping save - task store is empty (possible HMR race condition)');
+      return false;
+    }
+    
     const json = serializeTaskState();
     localStorage.setItem(STORAGE_KEY, json);
-    console.log(`Tasks saved to localStorage (${useTaskStore.getState().tasks.size} tasks)`);
+    console.log(`Tasks saved to localStorage (${taskCount} tasks)`);
     return true;
   } catch (error) {
     console.error('Failed to save tasks to localStorage:', error);
@@ -1076,3 +1140,26 @@ export function getLastSaveTime(): string | null {
   }
   return null;
 }
+
+// Auto-save subscription - saves to localStorage whenever tasks change
+// This helps prevent data loss during HMR reloads
+let autoSaveTimeout: ReturnType<typeof setTimeout> | null = null;
+const AUTO_SAVE_DEBOUNCE_MS = 500; // Debounce to avoid saving too frequently
+
+useTaskStore.subscribe(
+  (state) => state.tasks,
+  (tasks) => {
+    // Don't auto-save if tasks is empty (store might be resetting)
+    if (tasks.size === 0) return;
+    
+    // Debounce the auto-save
+    if (autoSaveTimeout) {
+      clearTimeout(autoSaveTimeout);
+    }
+    
+    autoSaveTimeout = setTimeout(() => {
+      saveTasksToStorage();
+      autoSaveTimeout = null;
+    }, AUTO_SAVE_DEBOUNCE_MS);
+  }
+);

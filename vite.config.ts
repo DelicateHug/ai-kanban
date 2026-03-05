@@ -16,6 +16,26 @@ export default defineConfig({
         changeOrigin: true,
         secure: false
       }
+    },
+    watch: {
+      usePolling: false,
+      // Ignore everything except src folder to prevent hot-reload from data file writes
+      ignored: (filePath) => {
+        // Always watch index.html and vite.config.ts
+        if (filePath.endsWith('index.html') || filePath.endsWith('vite.config.ts')) {
+          return false;
+        }
+        // Watch src folder
+        if (filePath.includes('\\src\\') || filePath.includes('/src/')) {
+          return false;
+        }
+        // Watch mcp folder (needed for the app)
+        if (filePath.includes('\\mcp\\') || filePath.includes('/mcp/')) {
+          return false;
+        }
+        // Ignore everything else (data, backend, config, logs, etc.)
+        return true;
+      }
     }
   }
 })

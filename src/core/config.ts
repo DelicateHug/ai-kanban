@@ -1,11 +1,71 @@
 import type { AppConfig } from './types';
 import defaultConfig from '../../config/settings.json';
 
+const SETTINGS_STORAGE_KEY = 'ai-kanban-settings';
+
 let config: AppConfig | null = null;
+
+// Listeners for config changes
+type ConfigChangeListener = (newConfig: AppConfig, oldConfig: AppConfig) => void;
+const configChangeListeners: Set<ConfigChangeListener> = new Set();
+
+export function addConfigChangeListener(listener: ConfigChangeListener): () => void {
+  configChangeListeners.add(listener);
+  return () => configChangeListeners.delete(listener);
+}
+
+function notifyConfigChange(newConfig: AppConfig, oldConfig: AppConfig): void {
+  for (const listener of configChangeListeners) {
+    try {
+      listener(newConfig, oldConfig);
+    } catch (error) {
+      console.error('Config change listener error:', error);
+    }
+  }
+}
+
+function loadStoredConfig(): AppConfig | null {
+  try {
+    const stored = localStorage.getItem(SETTINGS_STORAGE_KEY);
+    if (stored) {
+      const parsed = JSON.parse(stored);
+      // Merge with default config to ensure all keys exist
+      return mergeConfigs(defaultConfig as AppConfig, parsed);
+    }
+  } catch (error) {
+    console.warn('Failed to load stored config:', error);
+  }
+  return null;
+}
+
+function mergeConfigs(base: AppConfig, override: Partial<AppConfig>): AppConfig {
+  return {
+    ...base,
+    ...override,
+    workers: { ...base.workers, ...override.workers },
+    context: { ...base.context, ...override.context },
+    history: { ...base.history, ...override.history },
+    planning: { ...base.planning, ...override.planning },
+    review: { ...base.review, ...override.review },
+    autoSave: { ...base.autoSave, ...override.autoSave },
+    otherInstructions: { ...base.otherInstructions, ...override.otherInstructions },
+    mcp: { ...base.mcp, ...override.mcp },
+    stages: { ...base.stages, ...override.stages },
+  };
+}
+
+function saveConfigToStorage(cfg: AppConfig): void {
+  try {
+    localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(cfg));
+  } catch (error) {
+    console.error('Failed to save config to storage:', error);
+  }
+}
 
 export function getConfig(): AppConfig {
   if (!config) {
-    config = defaultConfig as AppConfig;
+    // First try to load from localStorage, then fall back to default
+    config = loadStoredConfig() || (defaultConfig as AppConfig);
     validateConfig(config);
   }
   return config;
@@ -141,10 +201,31 @@ export function getAutoSaveFilePath(): string {
 }
 
 export function updateConfig(newConfig: Partial<AppConfig>): void {
-  const currentConfig = getConfig();
-  config = { ...currentConfig, ...newConfig } as AppConfig;
+  const oldConfig = getConfig();
+  const mergedConfig = mergeConfigs(oldConfig, newConfig);
+  
+  // Validate before applying
+  validateConfig(mergedConfig);
+  
+  config = mergedConfig;
+  
+  // Persist to localStorage
+  saveConfigToStorage(config);
+  
+  // Notify listeners of the change
+  notifyConfigChange(config, oldConfig);
 }
 
 export function getFullConfig(): AppConfig {
   return getConfig();
+}
+
+// Reset config to defaults (useful for testing)
+export function resetConfigToDefaults(): void {
+  const oldConfig = config;
+  config = defaultConfig as AppConfig;
+  localStorage.removeItem(SETTINGS_STORAGE_KEY);
+  if (oldConfig) {
+    notifyConfigChange(config, oldConfig);
+  }
 }

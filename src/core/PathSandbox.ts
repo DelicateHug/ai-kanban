@@ -1,6 +1,12 @@
 /**
  * Path Sandbox Utilities - Validates and restricts path access based on project settings
  * Ensures MCP tools respect project boundaries unless external access is explicitly allowed
+ * 
+ * Access Rules:
+ * 1. Relative paths without ".." are always allowed (they resolve within the app's working directory)
+ * 2. Absolute paths or paths with ".." are checked against the project folder
+ * 3. Project folder has full read/write access
+ * 4. External paths require "Allow External Access" to be enabled
  */
 
 import { useProjectStore, getProjectPath } from './ProjectStore';
@@ -11,6 +17,29 @@ export interface PathValidationResult {
   allowed: boolean;
   reason?: string;
   projectPath?: string;
+  readOnly?: boolean; // True if access is allowed but only for reading (app working dir)
+}
+
+/**
+ * Check if a path is a simple relative path (doesn't escape with ..)
+ * Simple relative paths are within the MCP working directory and are always allowed
+ */
+export function isSimpleRelativePath(path: string): boolean {
+  // Normalize to forward slashes
+  const normalized = path.replace(/\\/g, '/');
+  
+  // Check if it's an absolute path (starts with / or drive letter)
+  if (normalized.match(/^[a-zA-Z]:|^\//)) {
+    return false;
+  }
+  
+  // Check if it contains .. which could escape the directory
+  if (normalized.includes('..')) {
+    return false;
+  }
+  
+  // It's a simple relative path like "work/implementation.md" or "./config.json"
+  return true;
 }
 
 /**
@@ -70,9 +99,21 @@ export function validatePathForTask(targetPath: string, taskId: string): PathVal
 
 /**
  * Validate if a path access is allowed for a task (using task data directly)
+ * 
+ * Access rules:
+ * 1. Simple relative paths (no ".." or absolute) are always allowed - they're within the app's working dir
+ * 2. Project folder paths have full access
+ * 3. Other paths require "Allow External Access"
  */
 export function validatePathForTaskData(targetPath: string, task: Task): PathValidationResult {
-  // If no project is assigned, allow all access
+  // Simple relative paths (like "work/implementation.md") are always allowed
+  // These resolve within the MCP server's working directory (the ai-jira app folder)
+  // and contain stage instructions needed for all tasks
+  if (isSimpleRelativePath(targetPath)) {
+    return { allowed: true };
+  }
+  
+  // If no project is assigned, allow all access for absolute/escape paths too
   if (!task.projectId) {
     return { allowed: true };
   }
@@ -92,8 +133,12 @@ export function validatePathForTaskData(targetPath: string, task: Task): PathVal
     };
   }
   
-  // Check if the target path is within the project folder
-  const isWithin = isPathWithinFolder(targetPath, projectPath);
+  // For absolute paths or paths with "..", check if they're within the project folder
+  // Resolve relative paths that contain ".." to absolute paths based on project folder
+  const resolvedPath = resolveProjectPath(targetPath, projectPath);
+  
+  // Check if the resolved path is within the project folder
+  const isWithin = isPathWithinFolder(resolvedPath, projectPath);
   
   if (isWithin) {
     return { 

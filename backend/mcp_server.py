@@ -305,6 +305,78 @@ async def read_file(path: str, start_line: Optional[int] = None, end_line: Optio
         return ToolCallResponse(success=False, error=str(e))
 
 
+async def grep_search(directory: str, pattern: str, file_pattern: Optional[str] = None, 
+                      ignore_case: bool = True, max_results: int = 50) -> ToolCallResponse:
+    """Search for text pattern in files within a directory."""
+    import os
+    import re
+    import fnmatch
+    
+    try:
+        results = []
+        files_searched = 0
+        
+        # Common patterns to ignore
+        ignore_dirs = {'.git', 'node_modules', '__pycache__', '.venv', 'venv', 'dist', 'build', '.next', 'out', '.cache', 'coverage'}
+        ignore_extensions = {'.pyc', '.pyo', '.exe', '.dll', '.so', '.dylib', '.bin', '.lock', '.map', '.min.js', '.min.css'}
+        
+        # Compile regex pattern
+        flags = re.IGNORECASE if ignore_case else 0
+        try:
+            regex = re.compile(pattern, flags)
+        except re.error as e:
+            return ToolCallResponse(success=False, error=f"Invalid regex pattern: {e}")
+        
+        for root, dirs, files in os.walk(directory):
+            # Skip ignored directories
+            dirs[:] = [d for d in dirs if d not in ignore_dirs]
+            
+            for filename in files:
+                # Check file pattern filter
+                if file_pattern and not fnmatch.fnmatch(filename, file_pattern):
+                    continue
+                
+                # Skip binary/ignored extensions
+                _, ext = os.path.splitext(filename)
+                if ext.lower() in ignore_extensions:
+                    continue
+                
+                filepath = os.path.join(root, filename)
+                rel_path = os.path.relpath(filepath, directory)
+                
+                try:
+                    with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
+                        files_searched += 1
+                        for line_num, line in enumerate(f, 1):
+                            if regex.search(line):
+                                results.append({
+                                    "file": rel_path,
+                                    "line": line_num,
+                                    "content": line.strip()[:150]  # Limit line length more aggressively
+                                })
+                                
+                                if len(results) >= max_results:
+                                    return ToolCallResponse(success=True, data={
+                                        "results": results,
+                                        "totalMatches": len(results),
+                                        "filesSearched": files_searched,
+                                        "truncated": True,
+                                        "message": f"Results limited to {max_results}. Use file_pattern to narrow search."
+                                    })
+                except (IOError, UnicodeDecodeError):
+                    # Skip files that can't be read
+                    continue
+        
+        return ToolCallResponse(success=True, data={
+            "results": results,
+            "totalMatches": len(results),
+            "filesSearched": files_searched,
+            "truncated": False
+        })
+    except Exception as e:
+        return ToolCallResponse(success=False, error=str(e))
+
+
 class SnapshotRequest(BaseModel):
     path: str
 
@@ -334,17 +406,27 @@ async def get_file_snapshot(request: SnapshotRequest):
     except Exception as e:
         return ToolCallResponse(success=False, error=str(e))
 
-async def list_directory(path: str, recursive: bool = False, pattern: Optional[str] = None) -> ToolCallResponse:
+async def list_directory(path: str, recursive: bool = False, pattern: Optional[str] = None, max_entries: int = 200) -> ToolCallResponse:
     """List contents of a directory."""
     import os
     import fnmatch
     
+    # Directories to always skip (large/irrelevant)
+    skip_dirs = {'.git', 'node_modules', '__pycache__', '.venv', 'venv', 'dist', 'build', '.next', 'out', '.cache', 'coverage', '.nyc_output'}
+    
     try:
         entries = []
+        truncated = False
         
         if recursive:
             for root, dirs, files in os.walk(path):
+                # Skip ignored directories
+                dirs[:] = [d for d in dirs if d not in skip_dirs]
+                
                 for name in dirs + files:
+                    if len(entries) >= max_entries:
+                        truncated = True
+                        break
                     full_path = os.path.join(root, name)
                     rel_path = os.path.relpath(full_path, path)
                     if pattern is None or fnmatch.fnmatch(name, pattern):
@@ -353,8 +435,16 @@ async def list_directory(path: str, recursive: bool = False, pattern: Optional[s
                             "isDirectory": os.path.isdir(full_path),
                             "size": os.path.getsize(full_path) if os.path.isfile(full_path) else 0
                         })
+                if truncated:
+                    break
         else:
             for name in os.listdir(path):
+                # Skip ignored directories at top level too
+                if name in skip_dirs:
+                    continue
+                if len(entries) >= max_entries:
+                    truncated = True
+                    break
                 full_path = os.path.join(path, name)
                 if pattern is None or fnmatch.fnmatch(name, pattern):
                     entries.append({
@@ -363,7 +453,12 @@ async def list_directory(path: str, recursive: bool = False, pattern: Optional[s
                         "size": os.path.getsize(full_path) if os.path.isfile(full_path) else 0
                     })
         
-        return ToolCallResponse(success=True, data={"entries": entries})
+        result = {"entries": entries, "totalCount": len(entries)}
+        if truncated:
+            result["truncated"] = True
+            result["message"] = f"Results limited to {max_entries} entries. Use pattern filter for more specific results."
+        
+        return ToolCallResponse(success=True, data=result)
     except FileNotFoundError:
         return ToolCallResponse(success=False, error=f"Directory not found: {path}")
     except Exception as e:
@@ -421,6 +516,80 @@ def get_system_metrics():
 async def root():
     """Health check endpoint."""
     return {"status": "ok", "service": "MCP Backend Server"}
+
+class BrowseFolderRequest(BaseModel):
+    path: Optional[str] = None  # Starting path, defaults to home directory
+
+@app.post("/api/browse-folders")
+async def browse_folders(request: BrowseFolderRequest):
+    """
+    Browse folders on the file system.
+    Returns a list of folders at the given path, or drives on Windows.
+    """
+    import os
+    import string
+    
+    try:
+        path = request.path
+        
+        # If no path provided or empty, return drives (Windows) or root (Unix)
+        if not path or path == "":
+            if platform.system() == "Windows":
+                # Get available drives
+                drives = []
+                for letter in string.ascii_uppercase:
+                    drive = f"{letter}:\\"
+                    if os.path.exists(drive):
+                        drives.append({
+                            "name": f"{letter}:",
+                            "path": drive,
+                            "type": "drive"
+                        })
+                return {"success": True, "path": "", "folders": drives, "canGoUp": False}
+            else:
+                path = "/"
+        
+        # Normalize path
+        path = os.path.normpath(path)
+        
+        if not os.path.exists(path):
+            return {"success": False, "error": f"Path does not exist: {path}", "folders": []}
+        
+        if not os.path.isdir(path):
+            return {"success": False, "error": f"Not a directory: {path}", "folders": []}
+        
+        # Get parent path for navigation
+        parent_path = os.path.dirname(path)
+        can_go_up = parent_path != path and parent_path != ""
+        
+        # List subdirectories
+        folders = []
+        try:
+            for item in sorted(os.listdir(path)):
+                item_path = os.path.join(path, item)
+                try:
+                    if os.path.isdir(item_path):
+                        folders.append({
+                            "name": item,
+                            "path": item_path,
+                            "type": "folder"
+                        })
+                except (PermissionError, OSError):
+                    # Skip folders we can't access
+                    continue
+        except PermissionError:
+            return {"success": False, "error": "Permission denied", "folders": []}
+        
+        return {
+            "success": True, 
+            "path": path, 
+            "parentPath": parent_path if can_go_up else None,
+            "folders": folders, 
+            "canGoUp": can_go_up
+        }
+    
+    except Exception as e:
+        return {"success": False, "error": str(e), "folders": []}
 
 @app.get("/api/system/metrics")
 async def system_metrics():
@@ -819,6 +988,13 @@ async def call_mcp_tool(request: ToolCallRequest) -> ToolCallResponse:
             recursive=input_data.get("recursive", False),
             pattern=input_data.get("pattern")
         ),
+        "grep_search": lambda: grep_search(
+            directory=input_data.get("directory", "."),
+            pattern=input_data.get("pattern", ""),
+            file_pattern=input_data.get("filePattern"),
+            ignore_case=input_data.get("ignoreCase", True),
+            max_results=input_data.get("maxResults", 100)
+        ),
         "write_file": lambda: write_file_tool(
             path=input_data.get("path", ""),
             content=input_data.get("content", ""),
@@ -1096,15 +1272,29 @@ async def list_tools():
         },
         {
             "name": "list_directory",
-            "description": "List contents of a directory",
+            "description": "List contents of a directory. Automatically skips node_modules, .git, etc. Limited to 200 entries.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "path": {"type": "string", "description": "Path to directory"},
-                    "recursive": {"type": "boolean", "default": False},
-                    "pattern": {"type": "string", "description": "Glob pattern to filter"}
+                    "recursive": {"type": "boolean", "default": False, "description": "If true, list recursively (limited)"},
+                    "pattern": {"type": "string", "description": "Glob pattern to filter (e.g., '*.tsx')"}
                 },
                 "required": ["path"]
+            }
+        },
+        {
+            "name": "grep_search",
+            "description": "Search for text/regex pattern in files. Skips node_modules, .git, etc. Limited to 50 results.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "directory": {"type": "string", "description": "Root directory to search in"},
+                    "pattern": {"type": "string", "description": "Text or regex pattern to search for"},
+                    "filePattern": {"type": "string", "description": "Glob pattern to filter files (e.g., '*.tsx')"},
+                    "ignoreCase": {"type": "boolean", "default": True}
+                },
+                "required": ["directory", "pattern"]
             }
         },
         {

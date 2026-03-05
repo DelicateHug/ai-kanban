@@ -1,32 +1,39 @@
 /**
- * CreateProjectModal - Modal for creating a new project
- * Allows user to specify project name, path, description, and visual settings
+ * EditProjectModal - Modal for editing an existing project
+ * Allows user to modify project name, path, description, and visual settings
  */
 
 import React, { useState, useEffect } from 'react';
 import { useProjectStore, PROJECT_COLORS, PROJECT_ICONS } from '../core/ProjectStore';
+import type { Project } from '../core/types';
 import { FolderBrowser } from './FolderBrowser';
 
-interface CreateProjectModalProps {
+interface EditProjectModalProps {
+  project: Project;
   onClose: () => void;
-  onCreated?: (projectId: string) => void;
+  onUpdated?: () => void;
+  onDelete?: () => void;
 }
 
-export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({ 
+export const EditProjectModal: React.FC<EditProjectModalProps> = ({ 
+  project,
   onClose,
-  onCreated 
+  onUpdated,
+  onDelete
 }) => {
-  const [name, setName] = useState('');
-  const [path, setPath] = useState('');
-  const [description, setDescription] = useState('');
-  const [selectedColor, setSelectedColor] = useState(PROJECT_COLORS[0]);
-  const [selectedIcon, setSelectedIcon] = useState(PROJECT_ICONS[0]);
+  const [name, setName] = useState(project.name);
+  const [path, setPath] = useState(project.path);
+  const [description, setDescription] = useState(project.description || '');
+  const [selectedColor, setSelectedColor] = useState(project.color);
+  const [selectedIcon, setSelectedIcon] = useState(project.icon);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showIconPicker, setShowIconPicker] = useState(false);
   const [showFolderBrowser, setShowFolderBrowser] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
-  const createProject = useProjectStore((state) => state.createProject);
+  const updateProject = useProjectStore((state) => state.updateProject);
+  const deleteProject = useProjectStore((state) => state.deleteProject);
 
   // Handle Escape key to close modal
   useEffect(() => {
@@ -56,24 +63,31 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
     setError(null);
 
     try {
-      // Validate that path exists (optional - could be created)
-      const project = createProject(
-        name.trim(), 
-        path.trim(), 
-        description.trim(),
-        selectedColor,
-        selectedIcon
-      );
+      updateProject(project.id, {
+        name: name.trim(),
+        path: path.trim(),
+        description: description.trim(),
+        color: selectedColor,
+        icon: selectedIcon
+      });
       
-      if (onCreated) {
-        onCreated(project.id);
+      if (onUpdated) {
+        onUpdated();
       }
       onClose();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to create project');
+      setError(err instanceof Error ? err.message : 'Failed to update project');
     } finally {
       setIsSubmitting(false);
     }
+  };
+
+  const handleDelete = () => {
+    deleteProject(project.id);
+    if (onDelete) {
+      onDelete();
+    }
+    onClose();
   };
 
   const handleFolderSelect = (selectedPath: string) => {
@@ -86,7 +100,7 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
       <div className="modal-content" style={{ maxWidth: '520px' }}>
         {/* Header */}
         <div className="modal-header">
-          <h2 className="modal-title">Create New Project</h2>
+          <h2 className="modal-title">Edit Project</h2>
           <button
             onClick={onClose}
             className="p-2 hover:bg-[var(--bg-elevated)] rounded-lg transition-colors text-muted hover:text-primary"
@@ -188,7 +202,6 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
                 border: '1px solid var(--border-secondary)',
                 color: 'var(--text-primary)'
               }}
-              autoFocus
             />
           </div>
 
@@ -247,19 +260,51 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
             />
           </div>
 
-          {/* Info Box */}
+          {/* Danger Zone */}
           <div 
-            className="p-4 rounded-lg flex gap-3"
-            style={{ background: 'rgba(96, 165, 250, 0.1)', border: '1px solid rgba(96, 165, 250, 0.3)' }}
+            className="p-4 rounded-lg"
+            style={{ background: 'rgba(239,71,67,0.1)', border: '1px solid rgba(239,71,67,0.3)' }}
           >
-            <span className="text-xl">🔒</span>
-            <div className="text-sm">
-              <p className="font-medium text-primary mb-1">Sandboxed by Default</p>
-              <p className="text-muted">
-                Tasks in this project will only be able to read/write files within the project folder. 
-                You can enable external access per-task if needed.
-              </p>
-            </div>
+            <h4 className="font-medium text-danger mb-2 flex items-center gap-2">
+              <span>⚠️</span>
+              Danger Zone
+            </h4>
+            <p className="text-sm text-muted mb-3">
+              Deleting a project will remove it from the list. Tasks associated with this project will become orphaned.
+            </p>
+            {!showDeleteConfirm ? (
+              <button
+                type="button"
+                onClick={() => setShowDeleteConfirm(true)}
+                className="btn px-4 py-2 text-sm"
+                style={{ 
+                  background: 'transparent', 
+                  border: '1px solid var(--danger)',
+                  color: 'var(--danger)'
+                }}
+              >
+                Delete Project
+              </button>
+            ) : (
+              <div className="flex items-center gap-3">
+                <span className="text-sm text-danger">Are you sure?</span>
+                <button
+                  type="button"
+                  onClick={handleDelete}
+                  className="btn px-4 py-2 text-sm"
+                  style={{ background: 'var(--danger)', color: '#fff' }}
+                >
+                  Yes, Delete
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowDeleteConfirm(false)}
+                  className="btn btn-ghost px-4 py-2 text-sm"
+                >
+                  Cancel
+                </button>
+              </div>
+            )}
           </div>
         </form>
 
@@ -283,12 +328,12 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
             {isSubmitting ? (
               <>
                 <span className="animate-spin">⏳</span>
-                Creating...
+                Saving...
               </>
             ) : (
               <>
-                <span>✨</span>
-                Create Project
+                <span>💾</span>
+                Save Changes
               </>
             )}
           </button>
@@ -307,4 +352,4 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
   );
 };
 
-export default CreateProjectModal;
+export default EditProjectModal;
